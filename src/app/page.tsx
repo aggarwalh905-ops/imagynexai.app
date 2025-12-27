@@ -149,26 +149,71 @@ export default function AIStudio() {
 
   const downloadImage = async (imgUrl: string) => {
     try {
-      const response = await fetch(imgUrl);
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
+      setLoading(true); // Optional: show loader while processing
+
+      // 1. Create a Canvas and Image object
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      const img = new Image();
+
+      // Fix CORS issues so we can manipulate the image
+      img.crossOrigin = "anonymous";
+      // Add a timestamp to bypass browser cache
+      img.src = imgUrl + (imgUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
+
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+      });
+
+      if (!ctx) return;
+
+      // 2. Set canvas size to match image
+      canvas.width = img.width;
+      canvas.height = img.height;
+
+      // 3. Draw the original image
+      ctx.drawImage(img, 0, 0);
+
+      // 4. Configure Watermark Styling
+      // Font size scales with image width (approx 3% of width)
+      const fontSize = Math.floor(canvas.width * 0.035);
+      ctx.font = `bold ${fontSize}px sans-serif`;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.7)"; // Semi-transparent white
+      ctx.shadowColor = "rgba(0, 0, 0, 0.5)"; // Drop shadow for readability
+      ctx.shadowBlur = 7;
       
-      // Filename ko saaf (clean) karne ke liye logic
-      // Prompt ke pehle 3 words lega aur special characters remove kar dega
+      const watermarkText = "IMAGYNEX AI";
+      const metrics = ctx.measureText(watermarkText);
+      
+      // Position: Bottom Right (with 20px padding)
+      const x = canvas.width - metrics.width - 20;
+      const y = canvas.height - 20;
+
+      // 5. Draw the text
+      ctx.fillText(watermarkText, x, y);
+
+      // 6. Generate filename
       const promptSlug = prompt
         ? prompt.split(" ").slice(0, 3).join("-").replace(/[^a-z0-9]/gi, "_").toLowerCase()
         : "synthesis";
 
+      // 7. Trigger download
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
       const link = document.createElement('a');
-      link.href = url;
-      link.download = `Imagynex-${promptSlug}-${Date.now()}.jpg`; // New Filename Format
+      link.href = dataUrl;
+      link.download = `Imagynex-${promptSlug}-${Date.now()}.jpg`;
       
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      window.URL.revokeObjectURL(url); // Memory saaf karne ke liye
+
     } catch (err) {
+      console.error("Download failed", err);
+      // Fallback: try opening in new tab if canvas fails
       window.open(imgUrl, '_blank');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -481,10 +526,11 @@ export default function AIStudio() {
                 <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Input Prompt</label>
                 
                 <div className="flex gap-3 md:gap-4">
-                  {/* --- MAGIC BUTTON ADDED HERE --- */}
+                  {/* Change your Magic button like this */}
                   <button 
                     onClick={applyMagicPrompt} 
-                    className="flex items-center gap-1.5 text-[9px] md:text-[10px] font-black text-amber-400 uppercase tracking-widest hover:text-amber-300 transition"
+                    aria-label="Apply Magic Prompt" // Added this
+                    className="..."
                   >
                     <Sparkles size={12} fill="currentColor" /> 
                     <span className="hidden xs:inline">Magic</span>
@@ -526,9 +572,15 @@ export default function AIStudio() {
                 </div>
               )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Change your Engine Select like this */}
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest px-1">Engine</label>
-                  <select value={model} onChange={(e) => setModel(e.target.value)} className="w-full bg-black/60 border border-white/5 p-4 rounded-2xl text-[10px] font-black uppercase tracking-widest outline-none focus:border-indigo-600 appearance-none cursor-pointer">
+                  <label htmlFor="engine-select" className="...">Engine</label> {/* Added htmlFor */}
+                  <select 
+                    id="engine-select" // Added id
+                    value={model} 
+                    onChange={(e) => setModel(e.target.value)} 
+                    className="..."
+                  >
                     <option value="flux">FLUX.1 (Ultra Detail)</option>
                     <option value="turbo">TURBO (Lightning Fast)</option>
                   </select>
