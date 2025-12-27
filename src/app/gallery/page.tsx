@@ -45,7 +45,7 @@ export default function Gallery() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     // Your specific secret key
-    if (params.get('admin') === 'imagynex-ai-7988xx-admin') {
+    if (params.get('admin') === process.env.NEXT_PUBLIC_ADMIN_KEY) {
       setIsAdmin(true);
       const fetchTotalCount = async () => {
         try {
