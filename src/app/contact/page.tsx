@@ -150,7 +150,7 @@ export default function Contact() {
       </main>
 
       <footer className="py-12 text-center opacity-30">
-        <p className="text-[10px] font-black uppercase tracking-[0.5em]">Imagynex AI &copy; 2024 • Neural Creative Engine</p>
+        <p className="text-[10px] font-black uppercase tracking-[0.5em]">Imagynex AI &copy; 2025 • Neural Creative Engine</p>
       </footer>
     </div>
   );

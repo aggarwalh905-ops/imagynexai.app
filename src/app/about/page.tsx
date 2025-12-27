@@ -85,7 +85,7 @@ export default function About() {
             <div className="space-y-6">
               <h2 className="text-3xl md:text-4xl font-black uppercase italic tracking-tight">Our Mission</h2>
               <p className="text-zinc-400 leading-relaxed text-lg">
-                Hamaara maqsad AI technology ko itna asaan banana hai ki koi bhi apni soch ko ek click mein haqeeqat (image) bana sake. Hum creativity ki boundaries ko push karne mein believe karte hain.
+                Our goal is to make AI technology so easy that anyone can turn their thoughts into reality (an image) with just a single click. We believe in pushing the boundaries of creativity.
               </p>
               <div className="pt-4 grid grid-cols-1 gap-6">
                 {features.map((f, i) => (
@@ -132,7 +132,7 @@ export default function About() {
 
       <footer className="border-t border-white/5 py-12 text-center">
         <p className="text-zinc-700 text-[10px] font-black uppercase tracking-[0.5em]">
-          Imagynex AI &copy; 2024 • Built for Visionaries
+          Imagynex AI &copy; 2025 • Built for Visionaries
         </p>
       </footer>
     </div>
