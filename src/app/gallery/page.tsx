@@ -130,13 +130,57 @@ export default function Gallery() {
   const downloadImg = async (e: React.MouseEvent, url: string, filename: string) => {
     e.stopPropagation();
     try {
+      // 1. Fetch the image
       const res = await fetch(url);
       const blob = await res.blob();
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = `Imagynex-${filename}.jpg`;
-      link.click();
-    } catch (e) { window.open(url, "_blank"); }
+      const img = new Image();
+      
+      // Create a URL for the blob
+      const objectUrl = URL.createObjectURL(blob);
+      img.src = objectUrl;
+
+      img.onload = () => {
+        // 2. Setup Canvas
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+
+        // Set canvas size to match image size
+        canvas.width = img.width;
+        canvas.height = img.height;
+
+        // 3. Draw the original image
+        ctx.drawImage(img, 0, 0);
+
+        // 4. Configure Watermark Settings
+        const fontSize = Math.floor(canvas.width * 0.03); // Responsive font size (3% of width)
+        ctx.font = `bold ${fontSize}px Inter, system-ui, sans-serif`;
+        ctx.fillStyle = "rgba(255, 255, 255, 0.5)"; // White with 50% opacity
+        ctx.textAlign = "right";
+        ctx.textBaseline = "bottom";
+
+        // Add a subtle shadow to make it visible on white backgrounds
+        ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+        ctx.shadowBlur = 4;
+
+        // 5. Draw the Text (Bottom-Right corner with padding)
+        const padding = 20;
+        ctx.fillText("Imagynex AI", canvas.width - padding, canvas.height - padding);
+
+        // 6. Trigger Download
+        const watermarkedUrl = canvas.toDataURL("image/jpeg", 0.9);
+        const link = document.createElement("a");
+        link.href = watermarkedUrl;
+        link.download = `Imagynex-${filename}.jpg`;
+        link.click();
+
+        // Cleanup
+        URL.revokeObjectURL(objectUrl);
+      };
+    } catch (error) {
+      console.error("Download failed:", error);
+      window.open(url, "_blank");
+    }
   };
 
   const filteredImages = useMemo(() => {

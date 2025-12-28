@@ -148,71 +148,60 @@ export default function AIStudio() {
   };
 
   const downloadImage = async (imgUrl: string) => {
-    try {
-      setLoading(true); // Optional: show loader while processing
+    // 1. Immediately show intent (even if it takes 100ms, UI feels responsive)
+    setLoading(true);
 
-      // 1. Create a Canvas and Image object
+    try {
       const canvas = document.createElement("canvas");
       const ctx = canvas.getContext("2d");
       const img = new Image();
 
-      // Fix CORS issues so we can manipulate the image
+      // Use anonymous to avoid CORS canvas "tainting"
       img.crossOrigin = "anonymous";
-      // Add a timestamp to bypass browser cache
-      img.src = imgUrl + (imgUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
-
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = reject;
-      });
-
-      if (!ctx) return;
-
-      // 2. Set canvas size to match image
-      canvas.width = img.width;
-      canvas.height = img.height;
-
-      // 3. Draw the original image
-      ctx.drawImage(img, 0, 0);
-
-      // 4. Configure Watermark Styling
-      // Font size scales with image width (approx 3% of width)
-      const fontSize = Math.floor(canvas.width * 0.035);
-      ctx.font = `bold ${fontSize}px sans-serif`;
-      ctx.fillStyle = "rgba(255, 255, 255, 0.7)"; // Semi-transparent white
-      ctx.shadowColor = "rgba(0, 0, 0, 0.5)"; // Drop shadow for readability
-      ctx.shadowBlur = 7;
       
-      const watermarkText = "IMAGYNEX AI";
-      const metrics = ctx.measureText(watermarkText);
-      
-      // Position: Bottom Right (with 20px padding)
-      const x = canvas.width - metrics.width - 20;
-      const y = canvas.height - 20;
+      // Adding the timestamp is good for fresh generations, 
+      // but ensure your storage (S3/Firebase) allows CORS
+      img.src = imgUrl; 
 
-      // 5. Draw the text
-      ctx.fillText(watermarkText, x, y);
+      img.onload = () => {
+        if (!ctx) return;
+        
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
 
-      // 6. Generate filename
-      const promptSlug = prompt
-        ? prompt.split(" ").slice(0, 3).join("-").replace(/[^a-z0-9]/gi, "_").toLowerCase()
-        : "synthesis";
+        // --- Watermark Logic ---
+        const fontSize = Math.floor(canvas.width * 0.035);
+        ctx.font = `bold ${fontSize}px sans-serif`;
+        ctx.textAlign = "right";
+        ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+        ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+        ctx.shadowBlur = 10;
+        
+        ctx.fillText("IMAGYNEX AI", canvas.width - 20, canvas.height - 20);
 
-      // 7. Trigger download
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
-      const link = document.createElement('a');
-      link.href = dataUrl;
-      link.download = `Imagynex-${promptSlug}-${Date.now()}.jpg`;
-      
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+        // --- Instant Trigger ---
+        const link = document.createElement('a');
+        // Using 'image/png' is sometimes faster for canvas than 'jpeg' encoding
+        link.href = canvas.toDataURL("image/png");
+        link.download = `Imagynex-${Date.now()}.png`;
+        link.click();
+        
+        setLoading(false);
+      };
+
+      img.onerror = () => {
+        throw new Error("Direct draw failed");
+      };
 
     } catch (err) {
-      console.error("Download failed", err);
-      // Fallback: try opening in new tab if canvas fails
-      window.open(imgUrl, '_blank');
-    } finally {
+      console.error("Fast download failed, trying fallback", err);
+      // Fallback if canvas is blocked
+      const link = document.createElement('a');
+      link.href = imgUrl;
+      link.target = "_blank";
+      link.download = "Imagynex-Art.jpg";
+      link.click();
       setLoading(false);
     }
   };
@@ -221,75 +210,43 @@ export default function AIStudio() {
     if (!image) return;
     setLoading(true);
 
-    try {
-      const canvas = document.createElement("canvas");
-      
-      // Fix: Add Type Assertion or Null Check
-      const ctx = canvas.getContext("2d");
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.src = image;
 
-      if (!ctx) {
-        throw new Error("Failed to get 2D context");
-      }
-
-      const img = new Image();
-      img.crossOrigin = "anonymous"; 
-      img.src = image + (image.includes('?') ? '&' : '?') + 't=' + Date.now();
-
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = () => reject(new Error("Image failed to load"));
-      });
-
+    img.onload = () => {
+      if (!ctx) return;
       canvas.width = img.width;
       canvas.height = img.height;
-
-      // Ab ctx safely use kar sakte hain
       ctx.drawImage(img, 0, 0);
 
-      // Watermark logic...
+      // Watermark
       const fontSize = Math.floor(canvas.width * 0.035);
       ctx.font = `bold ${fontSize}px sans-serif`;
+      ctx.textAlign = "right";
       ctx.fillStyle = "white";
-      ctx.shadowColor = "rgba(0, 0, 0, 0.8)";
-      ctx.shadowBlur = 15;
-      const watermarkText = "IMAGYNEX AI";
-      ctx.fillText(watermarkText, canvas.width - ctx.measureText(watermarkText).width - 20, canvas.height - 20);
+      ctx.fillText("IMAGYNEX AI", canvas.width - 20, canvas.height - 20);
 
+      // Convert to blob at 0.7 quality for FASTER mobile sharing
       canvas.toBlob(async (blob) => {
-        if (!blob) {
-          setLoading(false);
-          return;
-        }
+        if (!blob) return setLoading(false);
 
-        const fileName = `Imagynex-${Date.now()}.png`;
-        const file = new File([blob], fileName, { type: "image/png" });
-
+        const file = new File([blob], "ImagynexArt.png", { type: "image/png" });
         const shareData = {
-          title: 'Imagynex AI Art',
-          text: `Check out my creation: ${prompt}`,
+          title: 'Imagynex.AI Art',
           files: [file],
         };
 
-        try {
-          if (navigator.canShare && navigator.canShare(shareData)) {
-            await navigator.share(shareData);
-          } else {
-            copyImageLinkFallback();
-          }
-        } catch (shareErr) {
-          if (shareErr instanceof Error && shareErr.name !== 'AbortError') {
-            copyImageLinkFallback();
-          }
-        } finally {
-          setLoading(false);
+        if (navigator.canShare && navigator.canShare(shareData)) {
+          await navigator.share(shareData).catch(() => {});
+        } else {
+          copyImageLinkFallback();
         }
-      }, "image/png");
-
-    } catch (err) {
-      console.error(err);
-      copyImageLinkFallback();
-      setLoading(false);
-    }
+        setLoading(false);
+      }, "image/png", 0.7); // 0.7 quality makes the file smaller and sharing faster
+    };
   };
 
   // Fallback function agar share support na ho
