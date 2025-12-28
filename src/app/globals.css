@@ -4,3 +4,21 @@
 @theme {
   --color-brand-purple: #9333ea;
 }
+
+@layer utilities {
+  @keyframes shimmer {
+    100% {
+      transform: translateX(100%);
+    }
+  }
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* Custom cubic-bezier for "Apple-like" smoothness */
+.animate-in {
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}

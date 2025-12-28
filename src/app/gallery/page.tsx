@@ -1,346 +1,404 @@
 "use client";
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, Suspense, useRef, useCallback } from 'react';
 import { db } from "@/lib/firebase";
 import { 
-  collection, 
-  query, 
-  orderBy, 
-  onSnapshot, 
-  limit, 
-  startAfter, 
-  getDocs,
-  deleteDoc,
-  doc,
-  getCountFromServer 
+  collection, query, orderBy, onSnapshot, limit, where,
+  startAfter, getDocs, doc, setDoc, updateDoc, increment, 
+  arrayUnion, arrayRemove 
 } from "firebase/firestore";
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Download, Search, Sparkles, ArrowLeft, Share2, Trash2, Database, Zap, HardDrive } from 'lucide-react';
+import Link from 'next/link';
+import { 
+  Download, Search, Sparkles, Share2, 
+  User, Heart, Trophy, Edit3, Check, Zap, Eye, Flame, Crown, Medal, TrendingUp
+} from 'lucide-react';
 
 interface GalleryImage {
   id: string;
   imageUrl: string;
   prompt: string;
   style?: string;
-  seed?: string;
   createdAt?: any;
+  likesCount?: number;
+  creatorId?: string;
 }
 
-export default function Gallery() {
+interface ArtistProfile {
+  id: string;
+  displayName: string;
+  totalCreations: number;
+  totalLikes: number;
+  likedImages: string[];
+}
+
+function GalleryContent() {
   const router = useRouter();
+  const [mounted, setMounted] = useState(false);
+  
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState("All");
-  const [isAdmin, setIsAdmin] = useState(false);
-  
   const [lastDoc, setLastDoc] = useState<any>(null);
   const [hasMore, setHasMore] = useState(true);
-  const [totalCount, setTotalCount] = useState<number>(0);
+  const [showMyCreations, setShowMyCreations] = useState(false);
 
-  const categories = ["All", "Cinematic", "Anime", "Cyberpunk", "3D Render", "Oil Painting"];
+  const [userId, setUserId] = useState("");
+  const [profile, setProfile] = useState<ArtistProfile | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [leaderboard, setLeaderboard] = useState<ArtistProfile[]>([]);
+  const [timeLeft, setTimeLeft] = useState("");
 
-  // 1. Admin Access Check & Fetch Total Count
+  const categories = ["All", "Trending", "Cinematic", "Anime", "Cyberpunk", "3D Render"];
+
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    // Your specific secret key
-    if (params.get('admin') === process.env.NEXT_PUBLIC_ADMIN_KEY) {
-      setIsAdmin(true);
-      const fetchTotalCount = async () => {
-        try {
-          const coll = collection(db, "gallery");
-          const snapshot = await getCountFromServer(coll);
-          setTotalCount(snapshot.data().count);
-        } catch (e) { console.error(e); }
-      };
-      fetchTotalCount();
-    }
+    setMounted(true);
+    const timer = setInterval(() => {
+      const now = new Date();
+      const nextSun = new Date();
+      nextSun.setDate(now.getDate() + (7 - now.getDay()));
+      nextSun.setHours(23, 59, 59);
+      const diff = nextSun.getTime() - now.getTime();
+      const d = Math.floor(diff / 86400000);
+      const h = Math.floor((diff / 3600000) % 24);
+      const m = Math.floor((diff / 60000) % 60);
+      setTimeLeft(`${d}d ${h}h ${m}m`);
+    }, 1000);
+    return () => clearInterval(timer);
   }, []);
 
-  // 2. Initial Fetch
   useEffect(() => {
-    const q = query(collection(db, "gallery"), orderBy("createdAt", "desc"), limit(12));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as GalleryImage[];
-      setImages(docs);
-      setLastDoc(snapshot.docs[snapshot.docs.length - 1]);
-      setLoading(false);
-      if (snapshot.docs.length < 12) setHasMore(false);
-    }, (error) => {
-      console.error(error);
+    if (!mounted) return;
+    let uid = localStorage.getItem('imagynex_uid') || 'u_' + Math.random().toString(36).substr(2, 9);
+    localStorage.setItem('imagynex_uid', uid);
+    setUserId(uid);
+
+    const unsubUser = onSnapshot(doc(db, "users", uid), (snap) => {
+      if (snap.exists()) {
+        setProfile({ ...snap.data(), id: uid } as ArtistProfile);
+        setNewName(snap.data().displayName);
+      } else {
+        setDoc(doc(db, "users", uid), { 
+          displayName: `Creator_${uid.slice(0, 4)}`, 
+          totalLikes: 0, 
+          totalCreations: 0, 
+          likedImages: [] 
+        });
+      }
+    });
+
+    const qLeader = query(collection(db, "users"), orderBy("totalLikes", "desc"), limit(3));
+    const unsubLeader = onSnapshot(qLeader, (snap) => {
+      setLeaderboard(snap.docs.map(d => ({ id: d.id, ...d.data() } as ArtistProfile)));
+    });
+
+    return () => { unsubUser(); unsubLeader(); };
+  }, [mounted]);
+
+  const observer = useRef<IntersectionObserver | null>(null);
+  const lastImageElementRef = useCallback((node: HTMLDivElement | null) => {
+    if (loading || loadingMore) return;
+    if (observer.current) observer.current.disconnect();
+    observer.current = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMore && !searchQuery && !showMyCreations) {
+        loadMore();
+      }
+    });
+    if (node) observer.current.observe(node);
+  }, [loading, loadingMore, hasMore, searchQuery, showMyCreations]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    setLoading(true);
+
+    let constraints: any[] = [];
+    if (activeFilter === "Trending") constraints.push(orderBy("likesCount", "desc"));
+    else constraints.push(orderBy("createdAt", "desc"));
+
+    if (showMyCreations) {
+      constraints.push(where("creatorId", "==", userId));
+    } else if (activeFilter !== "All" && activeFilter !== "Trending") {
+      constraints.push(where("style", "==", activeFilter));
+    }
+
+    const q = query(collection(db, "gallery"), ...constraints, limit(12));
+    const unsub = onSnapshot(q, (snap) => {
+      let fetchedImages = snap.docs.map(d => ({ id: d.id, ...d.data() } as GalleryImage));
+      if (searchQuery.trim() !== "") {
+        fetchedImages = fetchedImages.filter(img => img.prompt.toLowerCase().includes(searchQuery.toLowerCase()));
+        setHasMore(false);
+      } else {
+        setHasMore(snap.docs.length === 12);
+        setLastDoc(snap.docs[snap.docs.length - 1]);
+      }
+      setImages(fetchedImages);
       setLoading(false);
     });
-    return () => unsubscribe();
-  }, []);
+    return () => unsub();
+  }, [mounted, activeFilter, showMyCreations, userId, searchQuery]);
 
-  // 3. Admin Delete Function
-  const handleDelete = async (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    if (window.confirm("CRITICAL: Permanent Deletion?")) {
-      try {
-        // Admin bypass ke liye query parameter pass karna zaruri hai
-        const adminKey = process.env.NEXT_PUBLIC_ADMIN_KEY;
-        
-        // Note: Firebase Web SDK (v9+) direct deleteDoc mein query params support nahi karta.
-        // Iska standard solution ye hai ki rules mein 'Admin Role' check kiya jaye.
-        
-        await deleteDoc(doc(db, "gallery", id));
-        
-        // UI update
-        setImages(prev => prev.filter(img => img.id !== id));
-        setTotalCount(prev => prev - 1);
-        alert("Deleted successfully.");
-      } catch (error) {
-        console.error(error);
-        alert("Unauthorized: You don't have permission to delete this.");
-      }
-    }
-  };
-
-  // 4. Pagination Load More
   const loadMore = async () => {
     if (!lastDoc || loadingMore) return;
     setLoadingMore(true);
-    const nextQuery = query(collection(db, "gallery"), orderBy("createdAt", "desc"), startAfter(lastDoc), limit(12));
-    try {
-      const snapshot = await getDocs(nextQuery);
-      if (snapshot.empty) {
-        setHasMore(false);
-      } else {
-        const newDocs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as GalleryImage[];
-        setImages(prev => [...prev, ...newDocs]);
-        setLastDoc(snapshot.docs[snapshot.docs.length - 1]);
-        if (snapshot.docs.length < 12) setHasMore(false);
-      }
-    } catch (error) { console.error(error); } finally { setLoadingMore(false); }
+    let constraints: any[] = [];
+    if (activeFilter === "Trending") constraints.push(orderBy("likesCount", "desc"));
+    else constraints.push(orderBy("createdAt", "desc"));
+    if (showMyCreations) constraints.push(where("creatorId", "==", userId));
+
+    const nextQ = query(collection(db, "gallery"), ...constraints, startAfter(lastDoc), limit(12));
+    const snap = await getDocs(nextQ);
+    if (!snap.empty) {
+      const newImages = snap.docs.map(d => ({ id: d.id, ...d.data() } as GalleryImage));
+      setImages(prev => [...prev, ...newImages]);
+      setLastDoc(snap.docs[snap.docs.length - 1]);
+      setHasMore(snap.docs.length === 12);
+    } else {
+      setHasMore(false);
+    }
+    setLoadingMore(false);
   };
 
-  const handleRemix = (img: GalleryImage) => {
-    const params = new URLSearchParams({
-      prompt: img.prompt,
-      style: img.style || "Default",
-      seed: img.seed || "",
-      img: img.imageUrl,
-      id: img.id
-    });
-    router.push(`/?${params.toString()}`);
-  };
-
-  const downloadImg = async (e: React.MouseEvent, url: string, filename: string) => {
+  const handleLike = async (e: React.MouseEvent, img: GalleryImage) => {
     e.stopPropagation();
-    try {
-      // 1. Fetch the image
-      const res = await fetch(url);
-      const blob = await res.blob();
-      const img = new Image();
-      
-      // Create a URL for the blob
-      const objectUrl = URL.createObjectURL(blob);
-      img.src = objectUrl;
-
-      img.onload = () => {
-        // 2. Setup Canvas
-        const canvas = document.createElement("canvas");
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-
-        // Set canvas size to match image size
-        canvas.width = img.width;
-        canvas.height = img.height;
-
-        // 3. Draw the original image
-        ctx.drawImage(img, 0, 0);
-
-        // 4. Configure Watermark Settings
-        const fontSize = Math.floor(canvas.width * 0.03); // Responsive font size (3% of width)
-        ctx.font = `bold ${fontSize}px Inter, system-ui, sans-serif`;
-        ctx.fillStyle = "rgba(255, 255, 255, 0.5)"; // White with 50% opacity
-        ctx.textAlign = "right";
-        ctx.textBaseline = "bottom";
-
-        // Add a subtle shadow to make it visible on white backgrounds
-        ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
-        ctx.shadowBlur = 4;
-
-        // 5. Draw the Text (Bottom-Right corner with padding)
-        const padding = 20;
-        ctx.fillText("Imagynex AI", canvas.width - padding, canvas.height - padding);
-
-        // 6. Trigger Download
-        const watermarkedUrl = canvas.toDataURL("image/jpeg", 0.9);
-        const link = document.createElement("a");
-        link.href = watermarkedUrl;
-        link.download = `Imagynex-${filename}.jpg`;
-        link.click();
-
-        // Cleanup
-        URL.revokeObjectURL(objectUrl);
-      };
-    } catch (error) {
-      console.error("Download failed:", error);
-      window.open(url, "_blank");
+    if (!profile || !userId) return;
+    const isLiked = profile.likedImages?.includes(img.id);
+    await updateDoc(doc(db, "users", userId), { likedImages: isLiked ? arrayRemove(img.id) : arrayUnion(img.id) });
+    await updateDoc(doc(db, "gallery", img.id), { likesCount: increment(isLiked ? -1 : 1) });
+    if (img.creatorId) {
+      await updateDoc(doc(db, "users", img.creatorId), { totalLikes: increment(isLiked ? -1 : 1) });
     }
   };
 
-  const filteredImages = useMemo(() => {
-    return images.filter((img) => {
-      const matchesSearch = img.prompt.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesFilter = activeFilter === "All" || img.style === activeFilter;
-      return matchesSearch && matchesFilter;
-    });
-  }, [images, searchQuery, activeFilter]);
+  const downloadImage = async (img: GalleryImage) => {
+    const response = await fetch(img.imageUrl);
+    const blob = await response.blob();
+    const bitmap = await createImageBitmap(blob);
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    ctx.drawImage(bitmap, 0, 0);
+    const isWinner = leaderboard[0]?.id === userId;
+    const isOwn = img.creatorId === userId;
+    if (!(isWinner && isOwn)) {
+      ctx.font = `bold ${canvas.width * 0.04}px sans-serif`;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.25)";
+      ctx.textAlign = "center";
+      ctx.fillText("Imagynex.AI", canvas.width / 2, canvas.height - 40);
+    }
+    const link = document.createElement("a");
+    link.download = `Imagynex-${img.id}.png`;
+    link.href = canvas.toDataURL();
+    link.click();
+  };
+
+  if (!mounted) return <div className="min-h-screen bg-black" />;
 
   return (
-    <div className="min-h-screen bg-[#020202] text-white selection:bg-indigo-500/30">
-      {/* Background Glow */}
-      <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
-        <div className="absolute top-0 left-1/4 w-96 h-96 bg-indigo-600/10 blur-[120px] rounded-full" />
-      </div>
-
-      <header className="border-b border-white/5 bg-black/40 backdrop-blur-2xl sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-3 group">
-            <div className="bg-indigo-600 p-2 rounded-xl group-hover:rotate-12 transition-all">
+    <div className="min-h-screen bg-[#020202] text-white selection:bg-indigo-500/30 font-sans selection:text-white">
+      <header className="border-b border-white/5 bg-black/40 backdrop-blur-3xl sticky top-0 z-50 p-4">
+        <div className="max-w-7xl mx-auto flex justify-between items-center">
+          <Link href="/" className="flex items-center gap-2 group">
+            <div className="bg-gradient-to-tr from-indigo-600 to-violet-500 p-2.5 rounded-xl shadow-lg shadow-indigo-600/20 group-hover:rotate-12 transition-transform duration-500">
               <Sparkles size={20} fill="currentColor" />
             </div>
             <span className="font-black text-2xl tracking-tighter uppercase italic">
-              Imagynex<span className="text-indigo-500 not-italic"> AI</span>
+              Imagynex<span className="text-indigo-500 not-italic">.AI</span>
             </span>
           </Link>
-          <div className="flex items-center gap-6">
-             {isAdmin && (
-               <div className="flex items-center gap-2 bg-red-500/10 px-3 py-1 rounded-full border border-red-500/20 animate-pulse">
-                 <div className="w-1.5 h-1.5 bg-red-500 rounded-full" />
-                 <span className="text-[9px] text-red-500 font-black uppercase tracking-widest">Master Admin</span>
-               </div>
-             )}
-             <Link href="/" className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-zinc-400 hover:text-white transition">
-               <ArrowLeft size={14} /> Back to Studio
-             </Link>
+          <div className="flex gap-3">
+             <button onClick={() => setShowMyCreations(!showMyCreations)} className={`p-3 rounded-2xl border transition-all duration-300 ${showMyCreations ? 'bg-indigo-600 border-indigo-400 shadow-[0_0_20px_rgba(79,70,229,0.4)]' : 'bg-zinc-900/50 border-white/10 hover:border-white/20'}`}>
+               <Eye size={20} className={showMyCreations ? "text-white" : "text-zinc-400"}/>
+             </button>
+             <button onClick={() => { navigator.clipboard.writeText(window.location.href); alert("Link Copied!"); }} className="p-3 bg-zinc-900/50 rounded-2xl border border-white/10 hover:bg-zinc-800 transition-all">
+               <Share2 size={20} className="text-zinc-400"/>
+             </button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-16">
-        {/* TITLE AND SEARCH */}
-        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-12 mb-16">
-          <div className="space-y-8">
-            {/* STATS BOX - ONLY VISIBLE TO ADMIN */}
-            {isAdmin && (
-              <div className="flex flex-wrap items-center gap-4">
-                 <div className="flex items-center gap-3 bg-zinc-900/50 border border-white/5 px-5 py-2.5 rounded-2xl">
-                    <Database size={16} className="text-indigo-500" />
-                    <div>
-                      <p className="text-[8px] text-zinc-500 uppercase font-black tracking-widest leading-none mb-1">Total Entries</p>
-                      <p className="text-xs font-bold text-indigo-400">{totalCount}</p>
-                    </div>
-                 </div>
-                 <div className="flex items-center gap-3 bg-zinc-900/50 border border-white/5 px-5 py-2.5 rounded-2xl">
-                    <HardDrive size={16} className="text-blue-500" />
-                    <div>
-                      <p className="text-[8px] text-zinc-500 uppercase font-black tracking-widest leading-none mb-1">Storage Weight</p>
-                      <p className="text-xs font-bold text-blue-400">{(totalCount * 1.5 / 1024).toFixed(2)} MB</p>
-                    </div>
-                 </div>
-                 <div className="flex items-center gap-3 bg-zinc-900/50 border border-white/5 px-5 py-2.5 rounded-2xl">
-                    <Zap size={16} className="text-emerald-500" />
-                    <div>
-                      <p className="text-[8px] text-zinc-500 uppercase font-black tracking-widest leading-none mb-1">Sync Status</p>
-                      <p className="text-xs font-bold text-emerald-400">Realtime</p>
-                    </div>
-                 </div>
-              </div>
-            )}
-            <h1 className="text-7xl md:text-9xl font-black tracking-tighter italic uppercase leading-[0.8]">
-              Global <span className="text-indigo-500">Archive</span>
-            </h1>
+      <main className="max-w-7xl mx-auto px-4 py-10">
+        
+        {/* HUD SECTION */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-16">
+          
+          {/* USER CARD */}
+          <div className="lg:col-span-4 bg-zinc-900/20 p-8 rounded-[40px] border border-white/5 relative overflow-hidden group hover:border-indigo-500/30 transition-all duration-500">
+             <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-600/10 blur-[80px] -mr-16 -mt-16 group-hover:bg-indigo-600/20 transition-all duration-700"></div>
+             
+             <div className="flex items-center gap-6 relative z-10">
+                <div className="w-20 h-20 bg-gradient-to-br from-indigo-500 via-indigo-600 to-violet-700 rounded-3xl flex items-center justify-center shadow-2xl ring-4 ring-black/50">
+                   <User size={38} className="text-white" />
+                </div>
+                <div className="flex-1">
+                   {isEditing ? (
+                     <input value={newName} onChange={e => setNewName(e.target.value)} onBlur={() => { updateDoc(doc(db, "users", userId), {displayName: newName}); setIsEditing(false); }} autoFocus className="bg-zinc-800 border-2 border-indigo-500 rounded-xl px-3 py-2 font-black outline-none text-lg w-full text-indigo-100"/>
+                   ) : (
+                     <h2 onClick={() => setIsEditing(true)} className="text-2xl font-black uppercase italic tracking-tighter cursor-pointer flex items-center gap-2 group/name hover:text-indigo-400 transition-all">
+                       {profile?.displayName} 
+                       <Edit3 size={14} className="opacity-0 group-hover/name:opacity-100 transition-opacity text-indigo-400"/>
+                     </h2>
+                   )}
+                   <div className="flex items-center gap-2 mt-1">
+                      <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                      <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Active Rank #42</p>
+                   </div>
+                </div>
+             </div>
+
+             <div className="grid grid-cols-2 gap-4 mt-10 pt-8 border-t border-white/5">
+                <div className="bg-white/5 p-4 rounded-3xl hover:bg-white/[0.08] transition-colors">
+                   <p className="text-2xl font-black text-indigo-400 tracking-tight">{profile?.totalLikes || 0}</p>
+                   <p className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Points</p>
+                </div>
+                <div className="bg-white/5 p-4 rounded-3xl hover:bg-white/[0.08] transition-colors">
+                   <p className="text-2xl font-black text-white tracking-tight">{profile?.totalCreations || 0}</p>
+                   <p className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Creations</p>
+                </div>
+             </div>
           </div>
 
-          <div className="w-full lg:w-[400px] relative group">
-            <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-zinc-600 group-focus-within:text-indigo-500 transition-colors" size={22} />
+          {/* LEADERBOARD CARD */}
+          <div className="lg:col-span-8 bg-zinc-900/20 p-8 rounded-[40px] border border-white/5 relative overflow-hidden backdrop-blur-sm">
+             <div className="flex justify-between items-end mb-8">
+                <div>
+                   <h3 className="text-sm font-black uppercase tracking-[0.4em] text-indigo-500/80 mb-1">Global Standings</h3>
+                   <h4 className="text-3xl font-black italic uppercase tracking-tighter">Hall of Fame</h4>
+                </div>
+                <div className="flex flex-col items-end">
+                   <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 flex items-center gap-2">
+                     <TrendingUp size={12}/> Season Reset
+                   </span>
+                   <div className="bg-indigo-500/10 px-4 py-2 rounded-2xl border border-indigo-500/20 backdrop-blur-md">
+                     <p className="text-xs font-black text-indigo-400 tabular-nums">{timeLeft}</p>
+                   </div>
+                </div>
+             </div>
+             
+             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                {leaderboard.map((artist, idx) => {
+                  const colors = [
+                    { bg: 'from-yellow-400 to-amber-600', text: 'text-amber-500', border: 'border-yellow-500/40', icon: 'text-yellow-500' },
+                    { bg: 'from-slate-300 to-slate-500', text: 'text-slate-400', border: 'border-slate-500/40', icon: 'text-slate-400' },
+                    { bg: 'from-orange-400 to-orange-700', text: 'text-orange-500', border: 'border-orange-500/40', icon: 'text-orange-600' }
+                  ][idx] || { bg: 'from-zinc-600 to-zinc-800', text: 'text-zinc-500', border: 'border-white/5', icon: 'text-zinc-500' };
+
+                  return (
+                    <div key={artist.id} className={`group relative p-5 rounded-[32px] border transition-all duration-500 hover:-translate-y-1 bg-gradient-to-b from-white/[0.03] to-transparent ${colors.border}`}>
+                       <div className="flex flex-col items-center text-center">
+                          <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${colors.bg} flex items-center justify-center mb-4 shadow-xl ring-4 ring-black/20 group-hover:scale-110 transition-transform`}>
+                             {idx === 0 ? <Crown size={28} className="text-black/80"/> : <span className="text-xl font-black text-black/80">{idx + 1}</span>}
+                          </div>
+                          <p className="text-xs font-black uppercase italic truncate max-w-full mb-1 group-hover:text-indigo-400 transition-colors">{artist.displayName}</p>
+                          <div className="flex items-center gap-1.5 px-3 py-1 bg-black/40 rounded-full border border-white/5">
+                            <Heart size={10} className={`${colors.icon}`} fill="currentColor"/>
+                            <p className="text-[11px] font-bold text-zinc-300 tabular-nums">{artist.totalLikes.toLocaleString()}</p>
+                          </div>
+                       </div>
+                       {idx === 0 && <div className="absolute top-4 right-4 animate-bounce"><Medal size={18} className="text-yellow-500/50"/></div>}
+                    </div>
+                  )
+                })}
+             </div>
+          </div>
+        </div>
+
+        {/* SEARCH & FILTERS */}
+        <div className="sticky top-[96px] z-40 bg-[#020202]/80 backdrop-blur-2xl py-6 space-y-5 border-b border-white/5 -mx-4 px-4">
+          <div className="relative group max-w-3xl mx-auto">
+            <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-indigo-500 transition-colors" size={20}/>
             <input 
-              type="text"
-              placeholder="Search concepts..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-zinc-900/30 border border-white/10 rounded-[32px] py-7 pl-16 pr-8 text-sm outline-none focus:border-indigo-500/50 focus:bg-zinc-900/60 transition-all font-bold uppercase tracking-widest"
+              placeholder="Explore the prompt architecture..." value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full bg-zinc-900/40 border-2 border-white/5 rounded-[24px] py-5 pl-14 pr-6 text-sm font-bold uppercase tracking-tight outline-none focus:border-indigo-500/40 focus:bg-indigo-500/5 transition-all"
             />
           </div>
+          <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2 justify-center">
+            {categories.map(cat => (
+              <button key={cat} onClick={() => setActiveFilter(cat)} className={`whitespace-nowrap px-8 py-3.5 rounded-2xl text-[10px] font-black uppercase border transition-all duration-300 flex items-center gap-2.5 ${activeFilter === cat ? 'bg-white text-black border-white shadow-[0_10px_30px_rgba(255,255,255,0.2)] scale-105' : 'bg-zinc-900/40 border-white/5 text-zinc-500 hover:text-white hover:border-white/20'}`}>
+                {cat === "Trending" && <Flame size={14} fill={activeFilter === "Trending" ? "black" : "none"}/>} {cat}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* Filters */}
-        <div className="flex items-center gap-3 overflow-x-auto pb-12 no-scrollbar">
-          {categories.map((cat) => (
-            <button key={cat} onClick={() => setActiveFilter(cat)}
-              className={`whitespace-nowrap px-10 py-4 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border ${activeFilter === cat ? 'bg-indigo-600 border-indigo-500 text-white shadow-xl shadow-indigo-600/20' : 'bg-zinc-900/40 border-white/5 text-zinc-500 hover:text-white hover:bg-zinc-800'}`}
-            >
-              {cat}
-            </button>
-          ))}
-        </div>
-
-        {loading ? (
-          <div className="flex flex-col items-center justify-center py-40 gap-6">
-            <div className="w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-            <p className="text-[10px] font-black uppercase tracking-[0.5em] text-zinc-600 animate-pulse">Syncing Neurons...</p>
+        {/* GRID */}
+        {loading && images.length === 0 ? (
+          <div className="py-40 text-center">
+            <div className="relative inline-block">
+               <Zap className="text-indigo-500 animate-pulse relative z-10" size={48}/>
+               <div className="absolute inset-0 bg-indigo-600 blur-3xl opacity-20 animate-pulse"></div>
+            </div>
+            <p className="text-xs font-black uppercase tracking-[0.8em] opacity-30 mt-6 animate-pulse">Calibrating Realities...</p>
           </div>
         ) : (
-          <>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-10">
-              {filteredImages.map((img) => (
-                <div key={img.id} onClick={() => handleRemix(img)} 
-                  className="group relative aspect-[3/4] rounded-[50px] overflow-hidden border border-white/5 bg-zinc-900/20 transition-all hover:border-indigo-500/50 cursor-pointer active:scale-95 shadow-2xl"
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 mt-12">
+            {images.map((img, idx) => {
+              const isWinner = leaderboard[0]?.id === userId;
+              const isOwn = img.creatorId === userId;
+              const canDownloadFree = isWinner && isOwn;
+
+              return (
+                <div 
+                  key={img.id} 
+                  ref={idx === images.length - 1 ? lastImageElementRef : null}
+                  className="group relative w-full aspect-[4/5] bg-zinc-900 rounded-[48px] overflow-hidden border border-white/5 shadow-2xl transition-all duration-700 hover:-translate-y-3 hover:shadow-indigo-500/10 hover:border-white/20"
                 >
-                  <img src={img.imageUrl} alt="AI" className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110" loading="lazy" />
+                  <img src={img.imageUrl} className="w-full h-full object-cover transition-transform duration-[1.5s] group-hover:scale-110" loading="lazy" />
                   
-                  {/* LAPTOP HOVER OVERLAY: md:opacity-0 hides it until group-hover */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent p-8 flex flex-col justify-end opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-500">
-                     <div className="bg-black/70 backdrop-blur-3xl border border-white/10 rounded-[40px] p-6 space-y-6 transform translate-y-4 md:translate-y-8 md:group-hover:translate-y-0 transition-transform duration-500">
-                        <p className="text-[11px] text-zinc-100 font-bold leading-relaxed line-clamp-3 uppercase italic tracking-tight opacity-95">
-                          "{img.prompt}"
-                        </p>
-                        
-                        <div className="flex justify-between items-center">
-                          <div className="flex gap-2">
-                             <span className="px-4 py-2 bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 rounded-2xl text-[9px] font-black uppercase tracking-widest">
-                               {img.style || 'Neural'}
-                             </span>
-                             {isAdmin && (
-                               <button onClick={(e) => handleDelete(e, img.id)} className="p-2.5 bg-red-500 text-white rounded-2xl hover:bg-red-600 transition-all shadow-lg shadow-red-500/20">
-                                 <Trash2 size={16} />
-                               </button>
-                             )}
-                          </div>
-                          <button onClick={(e) => downloadImg(e, img.imageUrl, img.id)} className="p-3.5 bg-white text-black rounded-2xl hover:bg-indigo-500 hover:text-white transition-all shadow-xl">
-                            <Download size={20} />
-                          </button>
-                        </div>
-                        <div className="w-full py-4 bg-indigo-600/90 rounded-2xl text-[10px] font-black uppercase tracking-[0.4em] text-center flex items-center justify-center gap-2 group-hover:bg-indigo-500 transition-colors shadow-lg">
-                          <Share2 size={14} /> Remix Data
-                        </div>
-                     </div>
+                  <div className="absolute top-7 right-7 z-20">
+                    <button 
+                      onClick={(e) => handleLike(e, img)} 
+                      className={`p-4.5 rounded-[22px] backdrop-blur-3xl border border-white/10 flex items-center gap-2.5 transition-all duration-500 ${profile?.likedImages?.includes(img.id) ? 'bg-red-500 border-red-400 scale-110 shadow-lg shadow-red-500/30' : 'bg-black/60 hover:bg-white hover:text-black hover:border-white'}`}
+                    >
+                      <Heart size={18} fill={profile?.likedImages?.includes(img.id) ? "white" : "none"} />
+                      <span className="text-sm font-black">{img.likesCount || 0}</span>
+                    </button>
+                  </div>
+
+                  <div className="absolute inset-x-0 bottom-0 p-8 bg-gradient-to-t from-black via-black/95 to-transparent flex flex-col gap-5 translate-y-6 group-hover:translate-y-0 transition-transform duration-500">
+                    <div className="flex gap-3">
+                      <button 
+                        onClick={() => downloadImage(img)} 
+                        className={`flex-1 py-4.5 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2.5 transition-all active:scale-95 ${canDownloadFree ? 'bg-indigo-600 text-white' : 'bg-white text-black'}`}
+                      >
+                        <Download size={18}/> {canDownloadFree ? "Winner Asset" : "Download"}
+                      </button>
+                      <button onClick={() => router.push(`/?prompt=${img.prompt}`)} className="bg-zinc-800/80 p-4 rounded-2xl border border-white/10 hover:bg-indigo-600 hover:border-indigo-400 transition-all">
+                        <Zap size={20} className="fill-white"/>
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between opacity-40 group-hover:opacity-100 transition-opacity">
+                       <p className="text-[10px] font-bold italic line-clamp-1 truncate w-40 text-zinc-400">"{img.prompt}"</p>
+                       <span className="text-[9px] font-black uppercase bg-white/10 px-2 py-1 rounded-md">{img.style || 'AI'}</span>
+                    </div>
                   </div>
                 </div>
-              ))}
-            </div>
+              );
+            })}
+          </div>
+        )}
 
-            {hasMore && (
-              <div className="flex justify-center mt-28">
-                <button onClick={loadMore} disabled={loadingMore}
-                  className="px-16 py-6 bg-zinc-900 border border-white/10 rounded-[32px] text-[12px] font-black uppercase tracking-[0.5em] hover:bg-indigo-600 hover:border-indigo-500 hover:shadow-2xl hover:shadow-indigo-600/30 transition-all active:scale-95 disabled:opacity-50"
-                >
-                  {loadingMore ? "Accessing Core..." : "Load More Concepts"}
-                </button>
-              </div>
-            )}
-          </>
+        {hasMore && !searchQuery && !showMyCreations && (
+          <div className="flex justify-center mt-24 mb-20">
+             <div className="flex items-center gap-4 bg-zinc-900/30 px-10 py-5 rounded-full border border-white/5 animate-pulse">
+                <div className="w-2 h-2 bg-indigo-500 rounded-full"></div>
+                <p className="text-[10px] font-black uppercase tracking-[0.4em] text-zinc-400">Streaming Assets</p>
+             </div>
+          </div>
         )}
       </main>
-
-      <footer className="max-w-7xl mx-auto px-6 py-20 border-t border-white/5 text-center mt-20 opacity-30">
-        <p className="text-[10px] font-black uppercase tracking-[1em]">Imagynex Archive System</p>
-      </footer>
     </div>
+  );
+}
+
+export default function Gallery() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-black" />}>
+      <GalleryContent />
+    </Suspense>
   );
 }

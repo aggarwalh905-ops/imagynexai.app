@@ -60,27 +60,6 @@ export default function Contact() {
             <p className="text-zinc-500 text-lg max-w-md font-medium leading-relaxed">
               Have a question about our neural models or a suggestion to improve our engine? We are here to listen.
             </p>
-            
-            <div className="space-y-6 pt-10">
-              <div className="flex items-center gap-4 group">
-                <div className="bg-white/5 p-4 rounded-2xl group-hover:bg-indigo-600/20 transition-colors">
-                  <Mail className="text-indigo-500" size={24} />
-                </div>
-                <div>
-                  <p className="text-[10px] font-black uppercase text-zinc-600 tracking-widest">General Inquiries</p>
-                  <p className="font-bold text-zinc-200">hello@imagynex.ai</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-4 group">
-                <div className="bg-white/5 p-4 rounded-2xl group-hover:bg-blue-600/20 transition-colors">
-                  <MessageSquare className="text-blue-500" size={24} />
-                </div>
-                <div>
-                  <p className="text-[10px] font-black uppercase text-zinc-600 tracking-widest">Community Hub</p>
-                  <p className="font-bold text-zinc-200">Join our Discord Server</p>
-                </div>
-              </div>
-            </div>
           </div>
 
           {/* RIGHT SIDE: CONTACT FORM */}
