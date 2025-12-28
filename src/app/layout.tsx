@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Analytics } from "@vercel/analytics/react"; // React optimized import
 import { GoogleAnalytics } from '@next/third-parties/google'
+import Script from 'next/script';
 
 export const metadata: Metadata = {
   title: "Imagynex AI | Neural Image Studio",
@@ -42,6 +43,13 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+    <head>
+        {/* Puter.js Script: Ise head mein load karna best hai taaki functions jaldi available ho jayein */}
+        <Script 
+          src="https://js.puter.com/v2/" 
+          strategy="beforeInteractive" 
+        />
+      </head>
       <body className="bg-black antialiased selection:bg-indigo-500/30">
         {children}
         
@@ -50,6 +58,11 @@ export default function RootLayout({
 
         {/* Google Analytics (Ise ab add karein) */}
         <GoogleAnalytics gaId="G-L8NKF8T60G" />
+
+        {/* Gemini API Key config (Optional: Agar aap client side pe Gemini use kar rahe hain) */}
+        {/* <script dangerouslySetInnerHTML={{
+          __html: `window.GEMINI_API_KEY = "${process.env.NEXT_PUBLIC_GEMINI_KEY}";`
+        }} /> */}
       </body>
     </html>
   );

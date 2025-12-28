@@ -72,6 +72,7 @@ export default function AIStudio() {
   const [communityImages, setCommunityImages] = useState<any[]>([]);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
+  
 
   const styles = [
     { name: "Default", suffix: "" },
@@ -101,6 +102,30 @@ export default function AIStudio() {
     navigator.clipboard.writeText(prompt);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatInput, setChatInput] = useState("");
+
+  const handlePuterChat = async () => {
+    if (!chatInput) return;
+    setLoading(true); // Loading state on karein
+    try {
+      // @ts-ignore
+      const response = await puter.ai.chat(
+        `Act as a professional prompt engineer. Convert this idea into a concise, high-impact image generation prompt (max 25 words). Focus on lighting, style, and quality. Idea: ${chatInput}`
+      );
+
+      setPrompt(response.toString().trim()); // response ko clean karke set karein
+      // Seedha main prompt box mein text daalna
+      setPrompt(response.toString());
+      setIsChatOpen(false); // Chat band
+      setChatInput(""); // Input clear
+    } catch (err) {
+      console.error("Puter Error:", err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const enhancePrompt = async () => {
@@ -483,24 +508,23 @@ export default function AIStudio() {
                 <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Input Prompt</label>
                 
                 <div className="flex gap-3 md:gap-4">
-                  {/* Change your Magic button like this */}
-                  <button 
-                    onClick={applyMagicPrompt} 
-                    aria-label="Apply Magic Prompt" // Added this
-                    className="..."
-                  >
+                  {/* 1. Magic Button */}
+                  <button onClick={applyMagicPrompt} className="flex items-center gap-1.5 text-[9px] md:text-[10px] font-black text-zinc-400 uppercase tracking-widest hover:text-white transition">
                     <Sparkles size={12} fill="currentColor" /> 
                     <span className="hidden xs:inline">Magic</span>
                   </button>
 
+                  {/* 2. Puter AI Assistant Trigger */}
+                  {/* In-line Assistant Trigger */}
+                  <button onClick={() => setIsChatOpen(true)} className="flex items-center gap-1.5 text-[9px] md:text-[10px] font-black text-amber-400 uppercase tracking-widest hover:text-amber-300 transition">
+                    <MessageSquareText size={12} />
+                    <span className="hidden xs:inline">Assistant</span>
+                  </button>
+
+                  {/* 3. Copy Button */}
                   <button onClick={handleCopy} disabled={!prompt} className="flex items-center gap-1.5 text-[9px] md:text-[10px] font-black text-zinc-400 uppercase tracking-widest hover:text-white disabled:opacity-20 transition">
                     {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
                     <span className="hidden xs:inline">{copied ? "Copied" : "Copy"}</span>
-                  </button>
-
-                  <button onClick={enhancePrompt} disabled={enhancing || !prompt} className="flex items-center gap-1.5 text-[9px] md:text-[10px] font-black text-indigo-400 uppercase tracking-widest hover:text-indigo-300 disabled:opacity-20 transition">
-                    {enhancing ? <Loader2 className="animate-spin" size={12} /> : <MessageSquareText size={12} />} 
-                    <span className="hidden xs:inline">Enhance</span>
                   </button>
                 </div>
               </div>
@@ -692,6 +716,42 @@ export default function AIStudio() {
             </div>
           </section>
         </div>
+
+        {/* --- GLOBAL UI COMPONENTS (Always placed at the end of Main) --- */}
+  
+        {/* --- FLOATING CHAT UI --- */}
+        <button onClick={() => setIsChatOpen(true)} className="fixed bottom-6 right-6 z-50 p-4 bg-indigo-600 rounded-full shadow-2xl hover:scale-110 active:scale-95 transition-all">
+          <MessageSquareText size={24} className="text-white" />
+        </button>
+
+        {isChatOpen && (
+          <>
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60]" onClick={() => setIsChatOpen(false)} />
+            <div className="fixed z-[70] bottom-0 left-0 right-0 h-[50vh] bg-zinc-900 border-t border-white/10 rounded-t-[32px] p-6 md:top-0 md:right-0 md:left-auto md:w-[350px] md:h-full md:rounded-none md:border-l animate-in slide-in-from-bottom md:slide-in-from-right">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xs font-black uppercase text-indigo-400">Imagynex Nexus AI</h3>
+                <button onClick={() => setIsChatOpen(false)}><X size={20}/></button>
+              </div>
+
+              <div className="space-y-4">
+                <textarea 
+                  value={chatInput} 
+                  onChange={(e) => setChatInput(e.target.value)} 
+                  placeholder="What's your idea?" 
+                  className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-sm h-32 outline-none focus:border-indigo-500 text-white"
+                />
+                <button 
+                  onClick={handlePuterChat} 
+                  disabled={loading || !chatInput}
+                  className="w-full py-4 bg-white text-black font-black rounded-2xl text-[10px] tracking-widest uppercase hover:bg-indigo-600 hover:text-white transition-all flex items-center justify-center gap-2"
+                >
+                  {loading ? <Loader2 className="animate-spin" size={14} /> : <Sparkles size={14} />}
+                  {loading ? "Optimizing..." : "Generate & Close"}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
       </main>
 
       <footer className="bg-black/60 border-t border-white/5 pt-16 md:pt-20 pb-44 px-5 text-center">
