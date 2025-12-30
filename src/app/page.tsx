@@ -1124,8 +1124,7 @@ export default function AIStudio() {
             <div className="space-y-3">
                <h4 className="text-[10px] font-black text-white uppercase tracking-widest">Connect</h4>
                <ul className="text-zinc-500 text-[10px] space-y-2 font-bold uppercase tracking-wider">
-                  <li><Link href="#">Discord</Link></li>
-                  <li><Link href="#">Twitter</Link></li>
+                  <li><Link href="https://github.com/aggarwalh905-ops">GitHub</Link></li>
                </ul>
             </div>
           </div>
