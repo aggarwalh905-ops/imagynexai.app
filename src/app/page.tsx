@@ -5,7 +5,7 @@ import {
   Download, Sparkles, Loader2, Image as ImageIcon, 
   Zap, Maximize, MessageSquareText, RefreshCw,
   MousePointer2, LayoutGrid, Menu, X, Share2,Wand2, Hash,
-  History, Sliders, AlertCircle, Ban, Copy, Check, Trash2, ChevronDown
+  History, Sliders, ShieldCheck, Info, AlertCircle, Ban, Copy, Check, Trash2, ChevronDown
 } from 'lucide-react';
 
 import { 
@@ -83,8 +83,8 @@ export default function AIStudio() {
   const [linkCopied, setLinkCopied] = useState(false);
   const [showToast, setShowToast] = useState(false);
   const [showReleaseModal, setShowReleaseModal] = useState(false);
-  const [negativePrompt, setNegativePrompt] = useState("");
-
+  const [negativePrompt, setNegativePrompt] = useState("blurry, bad anatomy, low quality, distorted, extra fingers, ugly, low-resolution, out of frame");
+  
   const [error, setError] = useState<{message: string, type: string} | null>(null);
 
   // Error auto-hide karne ke liye useEffect
@@ -94,6 +94,16 @@ export default function AIStudio() {
       return () => clearTimeout(timer);
     }
   }, [error]);
+
+  const [toast, setToast] = useState<{ message: string; type: 'info' | 'error' | 'success' } | null>(null);
+
+  // Toast ko automatic hide karne ke liye useEffect
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   useEffect(() => {
     const hasSeenv2 = localStorage.getItem('imagynex_v2_init');
@@ -461,220 +471,121 @@ export default function AIStudio() {
 
   // --- SEARCH FOR generateImage FUNCTION IN YOUR CODE AND UPDATE IT ---
 
-  // --- SEARCH FOR generateImage FUNCTION IN YOUR CODE AND UPDATE IT ---
-
   const generateImage = async (overrideSeed?: number) => {
-
+    // Ensure we have a prompt before proceeding
     if (!prompt) return;
 
     setLoading(true);
-
     setSaveStatus(null);
-
     setError(null);
 
-
-
     // 1. Get UID and Fetch Profile Name
-
     let storedUid = localStorage.getItem('imagynex_uid');
-
     if (!storedUid) {
-
       storedUid = 'u_' + Math.random().toString(36).substr(2, 9);
-
       localStorage.setItem('imagynex_uid', storedUid);
-
     }
-
-
-
-    // Gallery se sync karne ke liye current displayName nikalna
 
     let currentDisplayName = "Artist";
-
     try {
-
       const userDoc = await getDoc(doc(db, "users", storedUid));
-
       if (userDoc.exists()) {
-
         currentDisplayName = userDoc.data().displayName;
-
       }
-
     } catch (err) {
-
       console.error("User fetch error:", err);
-
     }
 
-
-
+    // Handle Seed Logic
     const finalSeed = overrideSeed !== undefined
-
       ? overrideSeed
-
       : (seed !== "" ? Number(seed) : Math.floor(Math.random() * 1000000));
 
-
-
     if (overrideSeed !== undefined || seed === "") {
-
       setSeed(finalSeed);
-
     }
 
-
-
+    // Aspect Ratio Logic
     let w = 1024, h = 1024;
-
     if (ratio === "16:9") { w = 1280; h = 720; }
-
     if (ratio === "9:16") { w = 720; h = 1280; }
 
-
-
     const styleSuffix = styles.find(s => s.name === selectedStyle)?.suffix || "";
-
-    const negPart = negativePrompt ? `&negative=${encodeURIComponent(negativePrompt)}` : "";
-
     const fullPrompt = `${prompt}${styleSuffix}`;
 
-   
+    // 2. Request through your SECURE proxy 
+    // ADDED: &negative_prompt parameter
+    const proxyUrl = `/api/generate?prompt=${encodeURIComponent(fullPrompt)}&negative_prompt=${encodeURIComponent(negativePrompt || "")}&width=${w}&height=${h}&model=flux&seed=${finalSeed}&t=${Date.now()}`;
 
-    const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(fullPrompt)}?width=${w}&height=${h}&model=${model}&seed=${finalSeed}&nologo=true${negPart}`;
+    try {
+      const response = await fetch(proxyUrl);
+      if (!response.ok) throw new Error("Server Error");
 
-   
-
-    const img = new Image();
-
-    img.src = url;
-
-   
-
-    img.onload = async () => {
-
-      setImage(url);
-
-      setLoading(false);
-
-     
-
-      const newEntry = {
-
-        url,
-
-        prompt: fullPrompt,
-
-        seed: finalSeed,
-
-        ratio,
-
-        model,
-
-        timestamp: Date.now(),
-
-        firestoreId: null
-
-      };
-
-     
-
-      try {
-
-        // --- UPDATED FIREBASE SAVE LOGIC ---
-
-       
-
-        // A. Gallery mein image add karna (With creatorName)
-
-        const docRef = await addDoc(collection(db, "gallery"), {
-
-          imageUrl: url,
-
-          prompt: fullPrompt,
-
-          style: selectedStyle,
-
-          seed: finalSeed,
-
-          ratio: ratio,
-
-          model: model,
-
-          createdAt: serverTimestamp(),
-
-          creatorId: storedUid,
-
-          creatorName: currentDisplayName, // <-- Yeh Gallery mein dikhega
-
-          likesCount: 0,
-
-          likedBy: []
-
-        });
-
-
-
-        // B. User profile mein Total Creations ko increment karna (SAFELY)
-
-        const userRef = doc(db, "users", storedUid);
-
-        await setDoc(userRef, {
-
-          totalCreations: increment(1),
-
-          // Agar user naya hai toh ye default fields bhi ban jayenge
-
-          displayName: currentDisplayName
-
-        }, { merge: true }); // merge: true se purana data delete nahi hoga
-
-
-
-        const entryWithId = { ...newEntry, firestoreId: docRef.id };
-
-        const updatedHistory = [entryWithId, ...history].slice(0, 15);
-
-        setHistory(updatedHistory);
-
-        localStorage.setItem('imagynex_history', JSON.stringify(updatedHistory));
-
-        setSaveStatus('cloud');
-
-      } catch (e) {
-
-        console.error("Firebase Save Error:", e);
-
-        const updatedHistory = [newEntry, ...history].slice(0, 15);
-
-        setHistory(updatedHistory);
-
-        localStorage.setItem('imagynex_history', JSON.stringify(updatedHistory));
-
-        setSaveStatus('local');
-
+      const blob = await response.blob();
+      
+      // Safety: If the image is too small, it's likely an error placeholder
+      if (blob.size < 50000) {
+        throw new Error("Authentication failed. Check your API Key in Vercel.");
       }
 
-    };
-
-
-
-    img.onerror = () => {
-
+      const objectURL = URL.createObjectURL(blob);
+      setImage(objectURL);
       setLoading(false);
 
+      // Prepare history entry with negativePrompt
+      const newEntry = {
+        url: proxyUrl,
+        prompt: fullPrompt,
+        negativePrompt: negativePrompt || "", // Added here
+        seed: finalSeed,
+        ratio,
+        model: "flux",
+        timestamp: Date.now(),
+        firestoreId: null
+      };
+
+      try {
+        // --- FIREBASE SAVE LOGIC ---
+        const docRef = await addDoc(collection(db, "gallery"), {
+          imageUrl: proxyUrl,
+          prompt: fullPrompt,
+          negativePrompt: negativePrompt || "", // Added here
+          style: selectedStyle,
+          seed: finalSeed,
+          ratio: ratio,
+          model: "flux",
+          createdAt: serverTimestamp(),
+          creatorId: storedUid,
+          creatorName: currentDisplayName,
+          likesCount: 0,
+          likedBy: []
+        });
+
+        const userRef = doc(db, "users", storedUid);
+        await setDoc(userRef, {
+          totalCreations: increment(1),
+          displayName: currentDisplayName
+        }, { merge: true });
+
+        const entryWithId = { ...newEntry, firestoreId: docRef.id };
+        const updatedHistory = [entryWithId, ...history].slice(0, 15);
+        setHistory(updatedHistory);
+        localStorage.setItem('imagynex_history', JSON.stringify(updatedHistory));
+        setSaveStatus('cloud');
+      } catch (e) {
+        console.error("Firebase Save Error:", e);
+        const updatedHistory = [newEntry, ...history].slice(0, 15);
+        setHistory(updatedHistory);
+        localStorage.setItem('imagynex_history', JSON.stringify(updatedHistory));
+        setSaveStatus('local');
+      }
+    } catch (err: any) {
+      setLoading(false);
       setError({
-
-        message: "The engine is currently overloaded. Please try again or switch to 'TURBO' model.",
-
+        message: err.message || "Engine overloaded. Please try again.",
         type: "server_busy"
-
       });
-
-    };
-
+    }
   };
 
   return (
@@ -899,11 +810,8 @@ export default function AIStudio() {
                       onChange={(e) => setModel(e.target.value)} 
                       className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none focus:border-indigo-500/50 text-white appearance-none cursor-pointer transition-all hover:bg-black/60"
                     >
-                      <option value="flux" className="bg-zinc-900 text-white">
-                        FLUX.1 (Ultra Detail & Realism)
-                      </option>
-                      <option value="turbo" className="bg-zinc-900 text-white">
-                        TURBO (Lightning Fast Execution)
+                      <option value="zimage" className="bg-zinc-900 text-white">
+                        ZIMAGE (Ultra Detail & Realism)
                       </option>
                     </select>
                     <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-600 group-hover:text-white transition-colors">
@@ -1169,6 +1077,33 @@ export default function AIStudio() {
               </div>
             </div>
           </>
+        )}
+
+        {toast && (
+          <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[100] animate-in fade-in slide-in-from-bottom-4 duration-300">
+            <div className={`px-6 py-4 rounded-2xl shadow-2xl border backdrop-blur-xl flex items-center gap-3 min-w-[320px] ${
+              toast.type === 'error' ? 'bg-red-500/10 border-red-500/20 text-red-400' :
+              toast.type === 'success' ? 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400' :
+              'bg-zinc-900/90 border-white/10 text-white'
+            }`}>
+              {toast.type === 'success' && <Check size={18} />}
+              {toast.type === 'error' && <ShieldCheck size={18} />}
+              {toast.type === 'info' && <Info size={18} />}
+              
+              <div className="flex flex-col">
+                <p className="text-[11px] font-black uppercase tracking-wider leading-none mb-1">
+                  {toast.type === 'error' ? 'System Limit' : 'Generation Update'}
+                </p>
+                <p className="text-[10px] font-bold opacity-90">{toast.message}</p>
+              </div>
+
+              {toast.type === 'error' && (
+                <Link href="/gallery" className="ml-auto bg-red-500 text-white px-3 py-1.5 rounded-lg text-[9px] font-black uppercase">
+                  Gallery
+                </Link>
+              )}
+            </div>
+          </div>
         )}
       </main>
 
