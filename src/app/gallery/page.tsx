@@ -10,7 +10,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
   Download, Search, Sparkles, Share2, ArrowLeft,
-  User, Heart, Trophy, Edit3, Check, Zap, Eye, Flame, Crown, Medal, TrendingUp, Gift, Info, Star, ShieldCheck, BadgeCheck
+  User, Heart, Trophy, Edit3, Check, Zap, Eye, Flame, Crown, Medal, TrendingUp, Gift, Info, Star, ShieldCheck, BadgeCheck, Lock, Globe
 } from 'lucide-react';
 
 interface GalleryImage {
@@ -21,6 +21,8 @@ interface GalleryImage {
   createdAt?: any;
   likesCount?: number;
   creatorId?: string;
+  creatorName?: string;
+  isPrivate?: boolean;
 }
 
 interface ArtistProfile {
@@ -65,6 +67,30 @@ function GalleryContent() {
   const isSunday = day === 0;
 
   const categories = ["All", "Trending", "Cinematic", "Anime", "Cyberpunk", "3D Render"];
+
+  const togglePrivacy = async (e: React.MouseEvent, imgId: string, currentStatus: boolean) => {
+    e.stopPropagation();
+    
+    // 1. Local state ko turant update karein taaki button turant change ho
+    setImages(prev => prev.map(img => 
+      img.id === imgId ? { ...img, isPrivate: !currentStatus } : img
+    ));
+
+    try {
+      const docRef = doc(db, "gallery", imgId);
+      await updateDoc(docRef, {
+        isPrivate: !currentStatus
+      });
+      console.log("Privacy updated successfully");
+    } catch (err) {
+      console.error("Error updating privacy:", err);
+      // 2. Agar error aaye toh wapas purane state par le jayein
+      setImages(prev => prev.map(img => 
+        img.id === imgId ? { ...img, isPrivate: currentStatus } : img
+      ));
+      alert("Permission Denied: You don't have access to change this image.");
+    }
+  };
 
   const fetchRanks = async (weekly: number, total: number) => {
     try {
@@ -178,48 +204,79 @@ function GalleryContent() {
     if (node) observer.current.observe(node);
   }, [loading, loadingMore, hasMore, searchQuery, showMyCreations]);
 
+  // --- 1. MAIN FETCH FUNCTION ---
   useEffect(() => {
     if (!mounted) return;
     setLoading(true);
 
-    const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
+    const searchParams = new URLSearchParams(window.location.search);
     const artistIdFromUrl = searchParams.get('user');
 
     let constraints: any[] = [];
+
+    // Sorting & Ownership logic
+    if (showMyCreations) {
+      constraints.push(where("creatorId", "==", userId));
+    } else if (artistIdFromUrl) {
+      constraints.push(where("creatorId", "==", artistIdFromUrl));
+    }
     
+    // Category Filter
+    if (activeFilter !== "All" && activeFilter !== "Trending" && !showMyCreations && !artistIdFromUrl) {
+      constraints.push(where("style", "==", activeFilter));
+    }
+
+    // Order By
     if (activeFilter === "Trending") {
       constraints.push(orderBy("likesCount", "desc"));
     } else {
       constraints.push(orderBy("createdAt", "desc"));
     }
 
-    if (artistIdFromUrl) {
-      constraints.push(where("creatorId", "==", artistIdFromUrl));
-    } else if (showMyCreations) {
-      constraints.push(where("creatorId", "==", userId));
-    } else if (activeFilter !== "All" && activeFilter !== "Trending") {
-      constraints.push(where("style", "==", activeFilter));
-    }
-
-    const q = query(collection(db, "gallery"), ...constraints, limit(12));
+    const q = query(collection(db, "gallery"), ...constraints, limit(100)); 
     
     const unsub = onSnapshot(q, (snap) => {
       let fetchedImages = snap.docs.map(d => ({ id: d.id, ...d.data() } as GalleryImage));
-      
+
+      // --- STRICTOR CLIENT-SIDE FILTERING ---
+      // Yeh ensure karta hai ki doosron ki private images hide ho jayein
+      // Filtered results
+      fetchedImages = fetchedImages.filter(img => {
+        // 1. Agar user "My Creations" tab mein hai, toh apni private images dikhao
+        if (showMyCreations) {
+          return true; 
+        }
+
+        // 2. Agar user Main Feed ya kisi aur ki profile dekh raha hai:
+        // Toh 'Private' image kisi ko nahi dikhni chahiye (Aapko bhi nahi)
+        if (img.isPrivate === true) {
+          return false;
+        }
+
+        // 3. Baaki sab dikhao (Public + Purani images)
+        return true;
+      });
+
+      // Search Filter
       if (searchQuery.trim() !== "") {
-        fetchedImages = fetchedImages.filter(img => img.prompt.toLowerCase().includes(searchQuery.toLowerCase()));
-        setHasMore(false);
-      } else {
-        setHasMore(snap.docs.length === 12);
-        setLastDoc(snap.docs[snap.docs.length - 1]);
+        fetchedImages = fetchedImages.filter(img => 
+          img.prompt.toLowerCase().includes(searchQuery.toLowerCase())
+        );
       }
+
       setImages(fetchedImages);
+      setHasMore(snap.docs.length === 100);
+      setLastDoc(snap.docs[snap.docs.length - 1]);
+      setLoading(false);
+    }, (err) => {
+      console.error("Firestore Error:", err);
       setLoading(false);
     });
 
     return () => unsub();
   }, [mounted, activeFilter, showMyCreations, userId, searchQuery]);
 
+  // --- 2. LOAD MORE FUNCTION ---
   const loadMore = async () => {
     if (!lastDoc || loadingMore) return;
     setLoadingMore(true);
@@ -228,23 +285,61 @@ function GalleryContent() {
     const artistIdFromUrl = searchParams.get('user');
 
     let constraints: any[] = [];
-    if (activeFilter === "Trending") constraints.push(orderBy("likesCount", "desc"));
-    else constraints.push(orderBy("createdAt", "desc"));
     
-    if (artistIdFromUrl) constraints.push(where("creatorId", "==", artistIdFromUrl));
-    else if (showMyCreations) constraints.push(where("creatorId", "==", userId));
-
-    const nextQ = query(collection(db, "gallery"), ...constraints, startAfter(lastDoc), limit(12));
-    const snap = await getDocs(nextQ);
-    if (!snap.empty) {
-      const newImages = snap.docs.map(d => ({ id: d.id, ...d.data() } as GalleryImage));
-      setImages(prev => [...prev, ...newImages]);
-      setLastDoc(snap.docs[snap.docs.length - 1]);
-      setHasMore(snap.docs.length === 12);
-    } else {
-      setHasMore(false);
+    if (showMyCreations) {
+        constraints.push(where("creatorId", "==", userId));
+    } else if (artistIdFromUrl) {
+        constraints.push(where("creatorId", "==", artistIdFromUrl));
     }
-    setLoadingMore(false);
+
+    if (activeFilter !== "All" && activeFilter !== "Trending" && !showMyCreations && !artistIdFromUrl) {
+      constraints.push(where("style", "==", activeFilter));
+    }
+
+    if (activeFilter === "Trending") {
+      constraints.push(orderBy("likesCount", "desc"));
+    } else {
+      constraints.push(orderBy("createdAt", "desc"));
+    }
+    
+    try {
+      const nextQ = query(
+        collection(db, "gallery"), 
+        ...constraints, 
+        startAfter(lastDoc), 
+        limit(24) 
+      );
+      
+      const snap = await getDocs(nextQ);
+      
+      if (!snap.empty) {
+        let newImages = snap.docs.map(d => ({ id: d.id, ...d.data() } as GalleryImage));
+
+        // --- STRICTOR CLIENT-SIDE FILTERING (Load More) ---
+        newImages = newImages.filter(img => {
+          if (img.creatorId === userId) return true;
+          if (img.isPrivate === true) return false;
+          return true; 
+        });
+
+        // Search Filter
+        if (searchQuery.trim() !== "") {
+          newImages = newImages.filter(img => 
+            img.prompt.toLowerCase().includes(searchQuery.toLowerCase())
+          );
+        }
+
+        setImages(prev => [...prev, ...newImages]);
+        setLastDoc(snap.docs[snap.docs.length - 1]);
+        setHasMore(snap.docs.length === 24);
+      } else {
+        setHasMore(false);
+      }
+    } catch (error) {
+      console.error("LoadMore Error:", error);
+    } finally {
+      setLoadingMore(false);
+    }
   };
 
   const handleLike = async (e: React.MouseEvent, img: GalleryImage) => {
@@ -526,6 +621,12 @@ function GalleryContent() {
                   
                   <img src={img.imageUrl} className="w-full h-full object-cover transition-transform duration-[1s] group-hover:scale-105" loading="lazy" />
                   
+                  {img.creatorId === userId && img.isPrivate && (
+                    <div className="absolute top-2 right-2 bg-black/60 p-1 rounded-full">
+                      <Lock size={14} className="text-yellow-500" />
+                    </div>
+                  )}
+
                   {/* Badges */}
                   {(isGlobalRank1 || isGlobalRank2 || isGlobalRank3) && (
                     <div className={`absolute top-4 left-4 z-20 p-1.5 rounded-lg backdrop-blur-md border flex items-center gap-1.5 ${
@@ -540,6 +641,23 @@ function GalleryContent() {
                     </div>
                   )}
 
+                  {/* Public/Private Toggle - Only for owner */}
+                  {isOwn && (
+                    <button 
+                      onClick={(e) => togglePrivacy(e, img.id, !!img.isPrivate)}
+                      className={`absolute top-4 left-4 z-30 p-2 md:p-2.5 rounded-xl backdrop-blur-xl border flex items-center gap-2 transition-all shadow-xl active:scale-90 ${
+                        img.isPrivate 
+                          ? 'bg-orange-500/20 border-orange-500/40 text-orange-500' 
+                          : 'bg-black/60 border-white/10 text-white hover:bg-indigo-600'
+                      }`}
+                    >
+                      {img.isPrivate ? <Lock size={14} /> : <Globe size={14} className="text-green-400" />}
+                      <span className="text-[8px] font-black uppercase tracking-tighter hidden md:block">
+                        {img.isPrivate ? 'Private' : 'Public'}
+                      </span>
+                    </button>
+                  )}
+
                   <div className="absolute top-4 right-4 z-20">
                     <button onClick={(e) => handleLike(e, img)} className={`p-2.5 rounded-xl backdrop-blur-xl border border-white/10 flex items-center gap-2 transition-all ${profile?.likedImages?.includes(img.id) ? 'bg-red-500 border-red-400 text-white' : 'bg-black/60 text-white'}`}>
                       <Heart size={14} fill={profile?.likedImages?.includes(img.id) ? "white" : "none"} />
@@ -548,6 +666,16 @@ function GalleryContent() {
                   </div>
 
                   <div className="absolute inset-x-0 bottom-0 p-4 md:p-6 bg-gradient-to-t from-black via-black/95 to-transparent flex flex-col gap-3 translate-y-4 group-hover:translate-y-0 transition-all">
+                    {/* Creator Name Label */}
+                    <div className="flex items-center gap-2 px-1">
+                        <div className="w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center">
+                            <User size={8} className="text-white" />
+                        </div>
+                        <p className="text-[9px] font-black text-indigo-400 uppercase tracking-tight">
+                            {img.creatorName || 'Anonymous Creator'}
+                        </p>
+                    </div>
+
                     <div className="flex gap-2">
                       <button onClick={() => downloadImage(img)} className={`flex-1 py-2.5 rounded-lg text-[8px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 ${hasPrize ? 'bg-yellow-500 text-black' : 'bg-white text-black'}`}>
                         {hasPrize ? <Gift size={14}/> : <Download size={14}/>} 

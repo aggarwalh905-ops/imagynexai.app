@@ -8,11 +8,13 @@ import {
   History, Sliders, ShieldCheck, Info, AlertCircle, Ban, Copy, Check, Trash2, ChevronDown
 } from 'lucide-react';
 
+
 import { 
   updateDoc,
   getDoc, 
   setDoc, 
-  increment, 
+  increment,
+  where, 
 } from "firebase/firestore";
 
 // import { db } from "./your-firebase-config-file";
@@ -65,6 +67,85 @@ const VisionaryLoader = () => (
   </div>
 );
 
+// Database open karne ka function
+const openDB = (): Promise<IDBDatabase> => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open("ImagynexOffline", 1);
+    
+    request.onupgradeneeded = () => {
+      const dbInstance = request.result;
+      if (!dbInstance.objectStoreNames.contains("private_images")) {
+        dbInstance.createObjectStore("private_images");
+      }
+    };
+    
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+};
+
+// Image save karne ka function (TypeScript Fixed)
+const saveImageOffline = async (id: string, blob: Blob): Promise<void> => {
+  const db = (await openDB()) as IDBDatabase;
+  
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("private_images", "readwrite");
+    const store = tx.objectStore("private_images");
+    
+    const request = store.put(blob, id);
+
+    tx.oncomplete = () => {
+      console.log("Image saved offline successfully");
+      resolve();
+    };
+
+    tx.onerror = () => {
+      console.error("Transaction error:", tx.error);
+      reject(tx.error);
+    };
+
+    request.onerror = () => {
+      console.error("Request error:", request.error);
+      reject(request.error);
+    };
+  });
+};
+
+// Image retrieve karne ka function (Fixed)
+const getImageOffline = async (id: string): Promise<Blob | null> => {
+  const localDB = (await openDB()) as IDBDatabase; // variable name changed to localDB
+  
+  return new Promise((resolve, reject) => {
+    try {
+      const tx = localDB.transaction("private_images", "readonly");
+      const store = tx.objectStore("private_images");
+      const request = store.get(id);
+
+      request.onsuccess = () => {
+        resolve(request.result || null);
+      };
+
+      request.onerror = () => {
+        console.error("Error fetching from IndexedDB", request.error);
+        reject(request.error);
+      };
+    } catch (err) {
+      console.error("Transaction failed", err);
+      resolve(null); // Fallback agar store na mile
+    }
+  });
+};
+
+interface CommunityImage {
+  id: string;
+  imageUrl: string;
+  prompt: string;
+  isPrivate?: boolean; 
+  creatorName?: string;
+  createdAt?: any;
+  [key: string]: any;
+}
+
 export default function AIStudio() {
   const [prompt, setPrompt] = useState("");
   const [seed, setSeed] = useState<number | string>(""); 
@@ -84,6 +165,7 @@ export default function AIStudio() {
   const [showToast, setShowToast] = useState(false);
   const [showReleaseModal, setShowReleaseModal] = useState(false);
   const [negativePrompt, setNegativePrompt] = useState("blurry, bad anatomy, low quality, distorted, extra fingers, ugly, low-resolution, out of frame");
+  const [isPublic, setIsPublic] = useState(true); // Default to public
   
   const [error, setError] = useState<{message: string, type: string} | null>(null);
 
@@ -96,6 +178,56 @@ export default function AIStudio() {
   }, [error]);
 
   const [toast, setToast] = useState<{ message: string; type: 'info' | 'error' | 'success' } | null>(null);
+
+  // 1. Interface define karein (ise component ke bahar ya upar rakh sakte hain)
+  interface HistoryItem {
+    id: string;
+    url: string;
+    isPrivate: boolean;
+    prompt?: string;
+    firestoreId?: string | null;
+    [key: string]: any; 
+  }
+
+  // ... component ke andar ...
+
+  useEffect(() => {
+    const loadHistory = async () => {
+      const saved = localStorage.getItem('imagynex_history');
+      if (!saved) return;
+
+      try {
+        // 2. Parsed data ko HistoryItem array ki tarah treat karein
+        const parsedHistory: HistoryItem[] = JSON.parse(saved);
+        
+        const restoredHistory = await Promise.all(
+          parsedHistory.map(async (item: HistoryItem) => {
+            // Check karein agar image private hai aur abhi tak blob URL nahi bana hai
+            if (item.isPrivate && item.url && !item.url.startsWith('blob:')) {
+              try {
+                const blob = await getImageOffline(item.id);
+                if (blob instanceof Blob) {
+                  return { 
+                    ...item, 
+                    url: URL.createObjectURL(blob) 
+                  };
+                }
+              } catch (err) {
+                console.error("Failed to restore private image:", item.id);
+              }
+            }
+            return item;
+          })
+        );
+        
+        setHistory(restoredHistory);
+      } catch (err) {
+        console.error("Error parsing history:", err);
+      }
+    };
+
+    loadHistory();
+  }, []);
 
   // Toast ko automatic hide karne ke liye useEffect
   useEffect(() => {
@@ -142,17 +274,36 @@ export default function AIStudio() {
     { name: "Oil Painting", suffix: ", textured canvas, heavy brushstrokes, classical art" }
   ];
 
+  // --- IS CODE KO UPDATE KAREIN ---
   useEffect(() => {
-    const saved = localStorage.getItem('imagynex_history');
-    if (saved) setHistory(JSON.parse(saved));
-  }, []);
+    // Simple query: Sirf latest images fetch karein
+    const q = query(
+      collection(db, "gallery"), 
+      orderBy("createdAt", "desc"), 
+      limit(40) // Zyada fetch karein taaki filter ke baad bhi 12-15 images bachen
+    );
 
-  useEffect(() => {
-    const q = query(collection(db, "gallery"), orderBy("createdAt", "desc"), limit(12));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setCommunityImages(docs);
+      const docs = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data() 
+      })) as CommunityImage[];
+      
+      // Filter Logic:
+      // 1. Agar isPrivate 'false' hai (Public Image)
+      // 2. Agar isPrivate field hi nahi hai (Purani Images)
+      const filteredDocs = docs.filter(img => 
+        img.isPrivate === false || 
+        img.isPrivate === undefined || 
+        img.isPrivate === null
+      );
+
+      // Filtered data ko state mein set karein (Sirf top 12)
+      setCommunityImages(filteredDocs.slice(0, 12));
+    }, (err) => {
+      console.error("Feed Snapshot Error:", err);
     });
+
     return () => unsubscribe();
   }, []);
 
@@ -436,35 +587,57 @@ export default function AIStudio() {
   const removeFromHistory = async (e: React.MouseEvent, index: number, firestoreId?: string) => {
     e.stopPropagation();
 
-    // Step 1: Confirm removal from the phone/local history
-    const confirmLocal = window.confirm("Remove this image from your recent history?");
+    // Step 1: Target item ko pehchanen
+    const itemToDelete = history[index];
+    if (!itemToDelete) return;
+
+    // Step 2: Confirm removal from phone
+    const confirmLocal = window.confirm("Remove this masterpiece from your history?");
     
     if (confirmLocal) {
-      // Step 2: If it's a cloud image, ask if they want to delete it from the Database too
-      let deleteFromCloud = false;
-      
-      if (firestoreId) {
-        deleteFromCloud = window.confirm(
-          "Do you also want to delete this image from the Global Gallery (Database)? \n\nClick 'OK' to delete everywhere, or 'Cancel' to keep it in the Gallery."
-        );
-      }
+      try {
+        // --- EXECUTION: 1. LOCAL CLEANUP ---
+        
+        // Local State & LocalStorage se hatayen
+        const updatedHistory = history.filter((_, i) => i !== index);
+        setHistory(updatedHistory);
+        localStorage.setItem('imagynex_history', JSON.stringify(updatedHistory));
 
-      // --- EXECUTION ---
-
-      // 1. Remove from local UI state and LocalStorage (Phone)
-      const updatedHistory = history.filter((_, i) => i !== index);
-      setHistory(updatedHistory);
-      localStorage.setItem('imagynex_history', JSON.stringify(updatedHistory));
-
-      // 2. Conditionally remove from Firebase (Database)
-      if (firestoreId && deleteFromCloud) {
-        try {
-          await deleteDoc(doc(db, "gallery", firestoreId));
-          console.log("Cloud record purged.");
-        } catch (error) {
-          console.error("Cloud delete failed:", error);
-          alert("Local history cleared, but cloud deletion failed. Please try again.");
+        // --- EXECUTION: 2. INDEXEDDB CLEANUP (OFFLINE STORAGE) ---
+        
+        // Agar image private hai, toh use IndexedDB se bhi delete karein
+        if (itemToDelete.isPrivate) {
+          try {
+            const localDB = (await openDB()) as IDBDatabase;
+            const tx = localDB.transaction("private_images", "readwrite");
+            const store = tx.objectStore("private_images");
+            
+            // ID use karke delete karein
+            const deleteRequest = store.delete(itemToDelete.id);
+            
+            deleteRequest.onsuccess = () => console.log("Offline binary deleted.");
+            deleteRequest.onerror = () => console.error("IndexedDB delete failed.");
+          } catch (dbErr) {
+            console.error("IndexedDB Access Error:", dbErr);
+          }
         }
+
+        // --- EXECUTION: 3. CLOUD CLEANUP ---
+
+        if (firestoreId) {
+          const deleteFromCloud = window.confirm(
+            "This image is also in the Global Gallery.\n\nDelete from Database too? 'Cancel' will keep it in the gallery but remove it from your history."
+          );
+
+          if (deleteFromCloud) {
+            await deleteDoc(doc(db, "gallery", firestoreId));
+            setToast?.({ message: "Purged from Cloud & Local", type: 'success' });
+          }
+        }
+
+      } catch (error) {
+        console.error("Critical Removal Error:", error);
+        alert("Something went wrong during deletion.");
       }
     }
   };
@@ -522,43 +695,44 @@ export default function AIStudio() {
       if (!response.ok) throw new Error("Server Error");
 
       const blob = await response.blob();
-      
-      // Safety: If the image is too small, it's likely an error placeholder
       if (blob.size < 50000) {
-        throw new Error("Authentication failed. Check your API Key in Vercel.");
+        throw new Error("Authentication failed or engine error.");
       }
 
       const objectURL = URL.createObjectURL(blob);
       setImage(objectURL);
       setLoading(false);
 
-      // Prepare history entry with negativePrompt
-      const newEntry = {
-        url: proxyUrl,
+      const entryId = `img_${Date.now()}`;
+
+      // 1. Prepare history entry (Use 'let' and 'any' or a proper Interface)
+      let newEntry: any = {
+        id: entryId, 
+        url: objectURL, 
         prompt: fullPrompt,
-        negativePrompt: negativePrompt || "", // Added here
         seed: finalSeed,
         ratio,
-        model: "flux",
+        model: "zimage",
         timestamp: Date.now(),
-        firestoreId: null
+        firestoreId: null,
+        isPrivate: !isPublic 
       };
 
+      // 2. --- FIREBASE SAVE ---
       try {
-        // --- FIREBASE SAVE LOGIC ---
         const docRef = await addDoc(collection(db, "gallery"), {
-          imageUrl: proxyUrl,
+          imageUrl: proxyUrl, 
           prompt: fullPrompt,
-          negativePrompt: negativePrompt || "", // Added here
           style: selectedStyle,
           seed: finalSeed,
           ratio: ratio,
-          model: "flux",
+          model: "zimage",
           createdAt: serverTimestamp(),
           creatorId: storedUid,
           creatorName: currentDisplayName,
           likesCount: 0,
-          likedBy: []
+          likedBy: [],
+          isPrivate: !isPublic 
         });
 
         const userRef = doc(db, "users", storedUid);
@@ -567,18 +741,29 @@ export default function AIStudio() {
           displayName: currentDisplayName
         }, { merge: true });
 
-        const entryWithId = { ...newEntry, firestoreId: docRef.id };
-        const updatedHistory = [entryWithId, ...history].slice(0, 15);
-        setHistory(updatedHistory);
-        localStorage.setItem('imagynex_history', JSON.stringify(updatedHistory));
-        setSaveStatus('cloud');
+        newEntry.firestoreId = docRef.id;
+        setSaveStatus(isPublic ? 'cloud' : 'private');
+
+        // 3. --- OFFLINE BACKUP (IndexedDB) ---
+        // Hum sirf private images ko IndexedDB mein rakhte hain local fast load ke liye
+        if (!isPublic) {
+          try {
+            await saveImageOffline(entryId, blob);
+          } catch (e) {
+            console.error("Offline backup failed:", e);
+          }
+        }
+
       } catch (e) {
-        console.error("Firebase Save Error:", e);
-        const updatedHistory = [newEntry, ...history].slice(0, 15);
-        setHistory(updatedHistory);
-        localStorage.setItem('imagynex_history', JSON.stringify(updatedHistory));
+        console.error("Firebase Database Save Error:", e);
         setSaveStatus('local');
       }
+
+      // 4. Update UI History
+      const updatedHistory = [newEntry, ...history].slice(0, 15);
+      setHistory(updatedHistory);
+      localStorage.setItem('imagynex_history', JSON.stringify(updatedHistory));
+
     } catch (err: any) {
       setLoading(false);
       setError({
@@ -587,6 +772,7 @@ export default function AIStudio() {
       });
     }
   };
+
 
   return (
     <div className="min-h-screen bg-[#020202] text-zinc-100 font-sans selection:bg-indigo-600/50">
@@ -760,35 +946,86 @@ export default function AIStudio() {
                     />
                   </div>
 
-                  {/* 2. Advanced Seed Control */}
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-zinc-600 uppercase flex items-center justify-between px-1">
-                      <span className="flex items-center gap-1"><Hash size={10} /> Seed Path</span>
-                      {seed && seed !== -1 && (
+                  {/* 2. Advanced Controls: Seed & Privacy */}
+                  <div className="space-y-4">
+                    {/* Seed Control */}
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-zinc-500 uppercase flex items-center justify-between px-1 tracking-widest">
+                        <span className="flex items-center gap-1.5"><Hash size={12} className="text-indigo-500" /> Seed Engine</span>
+                        {seed && seed !== -1 && (
+                          <button 
+                            onClick={() => {
+                              navigator.clipboard.writeText(seed.toString());
+                              setToast({ message: "Seed copied to clipboard", type: 'success' });
+                            }}
+                            className="text-[9px] text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1 group"
+                          >
+                            <Copy size={10} className="opacity-50 group-hover:opacity-100" />
+                            COPY SEED
+                          </button>
+                        )}
+                      </label>
+                      
+                      <div className="relative group">
+                        <input 
+                          type="number" 
+                          value={seed} 
+                          onChange={(e) => setSeed(e.target.value)} 
+                          className="w-full bg-black/40 border border-white/5 rounded-xl p-3 text-sm font-mono outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 transition-all placeholder:text-zinc-700" 
+                          placeholder="Random (-1)" 
+                        />
                         <button 
                           onClick={() => {
-                            navigator.clipboard.writeText(seed.toString());
-                            // You can trigger your showToast here
+                            const newSeed = Math.floor(Math.random() * 999999999);
+                            setSeed(newSeed);
                           }}
-                          className="text-[8px] text-indigo-500/50 hover:text-indigo-400 transition-colors tracking-[0.2em]"
+                          className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-lg bg-white/5 text-zinc-500 hover:text-indigo-400 hover:bg-white/10 transition-all"
+                          title="Generate Random Seed"
                         >
-                          Copy Seed
+                          <RefreshCw size={14} />
                         </button>
-                      )}
-                    </label>
-                    <div className="relative group">
-                      <input 
-                        type="number" 
-                        value={seed} 
-                        onChange={(e) => setSeed(e.target.value)} 
-                        className="w-full bg-black/40 border border-white/5 rounded-xl p-3 text-sm outline-none focus:border-indigo-500/50 transition-all" 
-                        placeholder="Random (-1)" 
-                      />
+                      </div>
+                    </div>
+
+                    {/* Privacy Engine Toggle */}
+                    <div className={`flex items-center justify-between p-4 rounded-2xl border transition-all duration-300 ${
+                      isPublic 
+                        ? 'bg-indigo-500/5 border-indigo-500/10' 
+                        : 'bg-emerald-500/5 border-emerald-500/10 shadow-[0_0_20px_-12px_rgba(16,185,129,0.3)]'
+                    }`}>
+                      <div className="flex items-center gap-3">
+                        <div className={`p-2 rounded-xl ${isPublic ? 'bg-indigo-500/10 text-indigo-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
+                          {isPublic ? <LayoutGrid size={20} /> : <ShieldCheck size={20} />}
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-xs font-bold text-white tracking-tight">
+                            {isPublic ? "Public Synthesis" : "Ghost Mode (Private)"}
+                          </span>
+                          <p className="text-[10px] text-zinc-500 leading-tight max-w-[180px]">
+                            {isPublic 
+                              ? "Results published to community gallery" 
+                              : "Locally encrypted. No data sent to gallery."}
+                          </p>
+                        </div>
+                      </div>
+
                       <button 
-                        onClick={() => setSeed(Math.floor(Math.random() * 999999999))}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-700 hover:text-indigo-400 transition-colors"
+                        onClick={() => {
+                          setIsPublic(!isPublic);
+                          setToast({ 
+                            message: isPublic ? "Ghost Mode Activated" : "Public Gallery Enabled", 
+                            type: 'info' 
+                          });
+                        }}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-all duration-500 outline-none ring-offset-black focus:ring-2 focus:ring-indigo-500/50 ${
+                          isPublic ? 'bg-indigo-600' : 'bg-zinc-800'
+                        }`}
                       >
-                        <RefreshCw size={14} />
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-lg transition-transform duration-300 ${
+                          isPublic ? 'translate-x-6' : 'translate-x-1'
+                        }`}>
+                          {!isPublic && <div className="absolute inset-0 flex items-center justify-center"><div className="w-1 h-1 bg-emerald-500 rounded-full" /></div>}
+                        </span>
                       </button>
                     </div>
                   </div>
@@ -954,44 +1191,81 @@ export default function AIStudio() {
           </div>
 
           {history.length > 0 && (
-            <section className="mt-4 space-y-4">
-              <div className="flex items-center justify-between px-2">
-                <div className="flex items-center gap-2">
-                  <History size={16} className="text-indigo-500" />
-                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em]">Recent Creations</h3>
-                </div>
-                <button onClick={() => {setHistory([]); localStorage.removeItem('imagynex_history');}} className="text-[10px] font-black text-zinc-500 hover:text-white transition uppercase">Clear Vault</button>
+          <section className="mt-4 space-y-4">
+            <div className="flex items-center justify-between px-2">
+              <div className="flex items-center gap-2">
+                <History size={16} className="text-indigo-500" />
+                <h3 className="text-[10px] font-black uppercase tracking-[0.2em]">Recent Creations</h3>
               </div>
-              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2 md:gap-3">
-                {history.map((item, idx) => (
-                  <div 
-                    key={idx} 
-                    onClick={() => handleImageSelection(item)} 
-                    className="aspect-square rounded-xl md:rounded-2xl overflow-hidden border border-white/5 cursor-pointer hover:border-indigo-500 transition group relative"
-                  >
-                    <img src={item.url} className="w-full h-full object-cover" alt="History" />
-                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center gap-2 p-2 text-center">
-                      <p className="text-[7px] text-white font-bold uppercase tracking-tighter line-clamp-2 px-1">
-                        {item.prompt}
-                      </p>
-                      <div className="flex gap-2">
-                        <div className="bg-indigo-600 p-1.5 rounded-lg text-white"><Maximize size={12} /></div>
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation(); // Taaki image select na ho jaye delete karne par
-                            removeFromHistory(e, idx, item.firestoreId);
-                          }} 
-                          className="bg-red-600 p-1.5 rounded-lg text-white hover:bg-red-500 transition"
-                        >
-                          <Trash2 size={12} />
-                        </button>
+              
+              {/* Updated Clear Vault Button */}
+              <button 
+                onClick={async () => {
+                  if(window.confirm("Delete all history and offline backups?")) {
+                    setHistory([]); 
+                    localStorage.removeItem('imagynex_history');
+                    // IndexedDB ko pura clear karne ke liye
+                    const localDB = await openDB();
+                    localDB.transaction("private_images", "readwrite").objectStore("private_images").clear();
+                  }
+                }} 
+                className="text-[10px] font-black text-zinc-500 hover:text-red-400 transition uppercase"
+              >
+                Clear Vault
+              </button>
+            </div>
+
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2 md:gap-3">
+              {history.map((item, idx) => (
+                <div 
+                  key={item.id || idx} // Use item.id if available
+                  onClick={() => handleImageSelection(item)} 
+                  className="aspect-square rounded-xl md:rounded-2xl overflow-hidden border border-white/5 cursor-pointer hover:border-indigo-500 transition group relative bg-zinc-900"
+                >
+                  {/* Main Image */}
+                  <img 
+                    src={item.url} 
+                    className="w-full h-full object-cover transition duration-500 group-hover:scale-110" 
+                    alt="AI Generated" 
+                    loading="lazy"
+                  />
+
+                  {/* 1. NEW: Private Mode Indicator (Top Left) */}
+                  {item.isPrivate && (
+                    <div className="absolute top-2 left-2 z-10 bg-black/60 backdrop-blur-md p-1 rounded-md border border-white/10 shadow-lg text-indigo-400">
+                      <ShieldCheck size={12} />
+                    </div>
+                  )}
+
+                  {/* Hover Overlay */}
+                  <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col items-center justify-center gap-2 p-2 text-center backdrop-blur-[2px]">
+                    <p className="text-[7px] text-zinc-200 font-bold uppercase tracking-tighter line-clamp-3 px-1">
+                      {item.prompt}
+                    </p>
+                    
+                    <div className="flex gap-2 mt-1">
+                      {/* Maximize Icon */}
+                      <div className="bg-indigo-600/80 p-1.5 rounded-lg text-white shadow-lg">
+                        <Maximize size={10} />
                       </div>
+                      
+                      {/* Delete Button */}
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation(); 
+                          removeFromHistory(e, idx, item.firestoreId);
+                        }} 
+                        className="bg-red-600/80 p-1.5 rounded-lg text-white hover:bg-red-500 transition shadow-lg"
+                      >
+                        <Trash2 size={10} />
+                      </button>
                     </div>
                   </div>
-                ))}
-              </div>
-            </section>
-          )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
           <section className="mt-20">
             <div className="flex items-end justify-between mb-8 px-2">
