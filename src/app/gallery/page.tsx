@@ -72,6 +72,93 @@ function GalleryContent() {
 
   const categories = ["All", "Trending", "Liked", "Cinematic", "Anime", "Cyberpunk", "3D Render"];
 
+  // 1. Add these states at the top of your component
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [dbStats, setDbStats] = useState({ total: 0, public: 0, private: 0, storageMB: 0 });
+
+  // 2. Add the Stats Fetcher
+  const fetchAdminStats = async () => {
+    try {
+      const galleryRef = collection(db, "gallery");
+      
+      // 1. Get Absolute Total
+      const totalSnap = await getCountFromServer(galleryRef);
+      const total = totalSnap.data().count;
+
+      // 2. Get Public (Explicitly marked false)
+      const publicQuery = query(galleryRef, where("isPrivate", "==", false));
+      const publicSnap = await getCountFromServer(publicQuery);
+      const publicCount = publicSnap.data().count;
+
+      // 3. Get Private (Explicitly marked true)
+      const privateQuery = query(galleryRef, where("isPrivate", "==", true));
+      const privateSnap = await getCountFromServer(privateQuery);
+      const privateCount = privateSnap.data().count;
+
+      // 4. Calculate Unknowns (Old images without the field)
+      const unassigned = total - (publicCount + privateCount);
+
+      setDbStats({
+        total,
+        public: publicCount + unassigned, // Treat old images as public
+        private: privateCount,
+        storageMB: Number(((total * 1.1) / 1024).toFixed(2))
+      });
+    } catch (error) {
+      console.error("Stats Error:", error);
+    }
+  };
+
+  // 3. Add the Admin Login Logic
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    // Trigger admin if URL has ?view=admin
+    if (params.get('view') === 'admin') {
+      const password = window.prompt("Enter Admin Security Key:");
+      
+      // Compares prompt to the password in your .env.local file
+      if (password === process.env.NEXT_PUBLIC_ADMIN_KEY) {
+        setIsAdmin(true);
+        fetchAdminStats();
+        alert("Admin Access Authorized.");
+      } else {
+        alert("Access Denied.");
+        router.push('/gallery');
+      }
+    }
+  }, []);
+
+  // 4. Admin Delete Function
+  const adminDelete = async (imgId: string, creatorId: string) => {
+    const confirm = window.confirm("ADMIN ACTION: Permanently delete this image?");
+    if (!confirm) return;
+
+    try {
+      // 1. We perform the delete. 
+      // To make this work with the rules above, you would usually need 
+      // Firebase Auth. Since we are using a 'No-Auth' setup, 
+      // set your Rules to 'allow delete: if true' ONLY when you are actively 
+      // cleaning up, then set it back to 'false' for security.
+      
+      await deleteDoc(doc(db, "gallery", imgId));
+
+      // 2. Decrement count for the user
+      const userRef = doc(db, "users", creatorId);
+      await updateDoc(userRef, {
+        totalCreations: increment(-1)
+      });
+
+      // 3. Update UI
+      setImages(prev => prev.filter(img => img.id !== imgId));
+      fetchAdminStats();
+      
+      alert("Deleted successfully.");
+    } catch (err: any) {
+      console.error(err);
+      alert("Delete failed: Permission Denied. (You must set 'allow delete: if true' in Firebase Rules to use this button without Auth)");
+    }
+  };
+
   const togglePrivacy = async (e: React.MouseEvent, imgId: string, currentStatus: boolean) => {
     e.stopPropagation();
     
@@ -535,6 +622,39 @@ function GalleryContent() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-6 md:py-10">
+        {isAdmin && (
+          <div className="max-w-7xl mx-auto px-4 mb-10">
+            <div className="bg-zinc-900 border-2 border-red-500/30 p-8 rounded-[2.5rem] shadow-2xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-4">
+                <ShieldCheck className="text-red-500 opacity-20" size={80} />
+              </div>
+              
+              <div className="flex justify-between items-center mb-8 relative z-10">
+                <div>
+                  <h2 className="text-xl font-black uppercase italic tracking-tighter text-red-500">System Administrator</h2>
+                  <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Master Database Control</p>
+                </div>
+                <button onClick={() => setIsAdmin(false)} className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-xl text-[10px] font-black uppercase transition-all">Logout</button>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 relative z-10">
+                <div className="bg-black/40 p-5 rounded-3xl border border-white/5">
+                  <p className="text-[10px] font-bold text-zinc-500 uppercase mb-1">Total Assets</p>
+                  <p className="text-3xl font-black">{dbStats.total}</p>
+                </div>
+                <div className="bg-black/40 p-5 rounded-3xl border border-white/5">
+                  <p className="text-[10px] font-bold text-zinc-500 uppercase mb-1">Public/Private</p>
+                  <p className="text-3xl font-black text-indigo-500">{dbStats.public} <span className="text-zinc-700">/</span> {dbStats.private}</p>
+                </div>
+                <div className="bg-black/40 p-5 rounded-3xl border border-white/5">
+                  <p className="text-[10px] font-bold text-zinc-500 uppercase mb-1">Database Weight</p>
+                  <p className="text-3xl font-black text-emerald-500">{dbStats.storageMB} <span className="text-sm">MB</span></p>
+                </div>
+                <button onClick={fetchAdminStats} className="bg-white text-black rounded-3xl font-black uppercase text-[10px] hover:scale-95 transition-transform">Refresh Data</button>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-8 md:mb-12">
             {/* GLOBAL RANK PROFILE CARD */}
             <div className={`lg:col-span-4 bg-zinc-900/20 p-6 md:p-8 rounded-[32px] md:rounded-[40px] border relative overflow-hidden group transition-all duration-500 ${
@@ -726,6 +846,20 @@ function GalleryContent() {
                     alt={img.prompt}
                   />
 
+                  {/* ADMIN DELETE BUTTON - Only visible when isAdmin is true */}
+                  {isAdmin && (
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        adminDelete(img.id, img.creatorId);
+                      }}
+                      className="absolute top-4 right-14 z-50 p-2.5 bg-red-600 hover:bg-red-500 text-white rounded-2xl shadow-2xl transition-all active:scale-90 flex items-center gap-2 border border-red-400/50"
+                    >
+                      <Trash2 size={16} />
+                      <span className="text-[10px] font-black uppercase">Admin Delete</span>
+                    </button>
+                  )}
+
                   {/* Small Private Indicator (Top Right) */}
                   {img.creatorId === userId && img.isPrivate && (
                     <div className="absolute top-2 right-2 bg-black/60 p-1 rounded-full z-20 md:hidden">
@@ -759,16 +893,6 @@ function GalleryContent() {
                       <span className="text-[8px] font-black uppercase tracking-tighter hidden md:block">
                         {img.isPrivate ? 'Private' : 'Public'}
                       </span>
-                    </button>
-                  )}
-
-                  {/* Delete Button (Top Middle-Right) - Only in My Studio for Owner */}
-                  {showMyCreations && isOwn && (
-                    <button
-                      onClick={(e) => deleteImage(e, img.id, img.creatorId)}
-                      className="absolute top-4 right-16 z-30 p-2 md:p-2.5 rounded-xl bg-red-500/20 border border-red-500/40 text-red-500 backdrop-blur-xl hover:bg-red-500 hover:text-white transition-all shadow-xl active:scale-90"
-                    >
-                      <Trash2 size={14} />
                     </button>
                   )}
 
