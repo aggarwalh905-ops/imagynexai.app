@@ -716,7 +716,7 @@ export default function AIStudio() {
       // --- 1. GET ACCURATE AUTH ID ---
       // Hum hamesha Firebase Auth ki UID use karenge rule mismatch se bachne ke liye
       const auth = getAuth();
-      const actualFirebaseUid = auth.currentUser?.uid || storedUid; 
+      const actualFirebaseUid = storedUid; 
 
       // 2. Prepare history entry
       let newEntry: any = {
@@ -749,12 +749,12 @@ export default function AIStudio() {
           isPrivate: !isPublic 
         });
 
-        // User Profile Update
-        const userRef = doc(db, "users", actualFirebaseUid);
+        // User Profile Update using localStorage ID
+        const userRef = doc(db, "users", storedUid); // Use storedUid directly
         await setDoc(userRef, {
           totalCreations: increment(1),
           displayName: currentDisplayName,
-          lastActive: serverTimestamp(), // Add this line
+          lastActive: serverTimestamp(),
           lastLoginId: storedUid 
         }, { merge: true });
 

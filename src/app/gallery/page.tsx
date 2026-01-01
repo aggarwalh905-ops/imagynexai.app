@@ -538,6 +538,46 @@ function GalleryContent() {
 
   if (!mounted) return <div className="min-h-screen bg-black" />;
 
+  const updateNameGlobally = async () => {
+    // 1. Validation: Don't run if name is empty or hasn't changed
+    if (!newName || newName === profile?.displayName) {
+      setIsEditing(false);
+      return;
+    }
+
+    try {
+      // 2. Update the User Profile document first
+      const userRef = doc(db, "users", userId);
+      await updateDoc(userRef, { displayName: newName });
+
+      // 3. Find all images in 'gallery' created by this userId
+      const imgQuery = query(
+        collection(db, "gallery"), 
+        where("creatorId", "==", userId)
+      );
+      const querySnapshot = await getDocs(imgQuery);
+
+      // 4. Create a Batch update
+      const { writeBatch } = await import("firebase/firestore");
+      const batch = writeBatch(db);
+
+      querySnapshot.forEach((imageDoc) => {
+        batch.update(imageDoc.ref, { creatorName: newName });
+      });
+
+      // 5. Commit all changes to the database
+      await batch.commit();
+
+      setIsEditing(false);
+      console.log("Success: Name updated on all previous images.");
+    } catch (error) {
+      console.error("Global Update Error:", error);
+      alert("Failed to update name on previous images.");
+      setNewName(profile?.displayName || ""); // Reset UI to old name on failure
+      setIsEditing(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#020202] text-white selection:bg-indigo-500/30 font-sans">
       {/* Mobile Back Header Overlay */}
@@ -676,7 +716,16 @@ function GalleryContent() {
                   </div>
                   <div className="flex-1">
                      {isEditing ? (
-                       <input value={newName} onChange={e => setNewName(e.target.value)} onBlur={() => { updateDoc(doc(db, "users", userId), {displayName: newName}); setIsEditing(false); }} autoFocus className="bg-zinc-800 border-2 border-indigo-500 rounded-xl px-3 py-1 font-black outline-none text-base md:text-lg w-full text-indigo-100"/>
+                       <input 
+                        value={newName} 
+                        onChange={e => setNewName(e.target.value)} 
+                        // Runs when you click away
+                        onBlur={updateNameGlobally} 
+                        // Runs when you press Enter
+                        onKeyDown={(e) => e.key === 'Enter' && updateNameGlobally()} 
+                        autoFocus 
+                        className="bg-zinc-800 border-2 border-indigo-500 rounded-xl px-3 py-1 font-black outline-none text-base md:text-lg w-full text-indigo-100"
+                      />
                      ) : (
                        <h2 onClick={() => setIsEditing(true)} className="text-lg md:text-2xl font-black uppercase italic tracking-tighter cursor-pointer flex items-center gap-2 hover:text-indigo-400 transition-all">
                          {profile?.displayName} 
@@ -809,20 +858,20 @@ function GalleryContent() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mt-6">
             {images.map((img, idx) => {
-              // LEADERBOARD RANK LOGIC
-              const isGlobalRank1 = globalLeaderboard[0]?.id === img.creatorId;
-              const isGlobalRank2 = globalLeaderboard[1]?.id === img.creatorId;
-              const isGlobalRank3 = globalLeaderboard[2]?.id === img.creatorId;
+              // 1. LEADERBOARD RANK LOGIC (Ensure globalLeaderboard exists)
+              const isGlobalRank1 = globalLeaderboard?.[0]?.id === img.creatorId;
+              const isGlobalRank2 = globalLeaderboard?.[1]?.id === img.creatorId;
+              const isGlobalRank3 = globalLeaderboard?.[2]?.id === img.creatorId;
 
-              // OWNERSHIP & PRIZE ELIGIBILITY
+              // 2. OWNERSHIP & PRIZE
               const isOwn = img.creatorId === userId;
               const is1stEligible = (isMonday || isTuesday) && profile?.isSeasonWinner && isOwn;
               const is2ndEligible = isMonday && profile?.isSecondPlace && isOwn;
               const hasPrize = is1stEligible || is2ndEligible;
 
-              // GLOBAL LEVEL FRAMES
+              // 3. FRAME STYLE LOGIC
               const frameStyle = isGlobalRank1
-                ? "border-yellow-500 shadow-[0_0_25px_-5px_rgba(234,179,8,0.4)] ring-1 ring-yellow-500/20"
+                ? "border-yellow-500 shadow-[0_0_25px_-5px_rgba(234,179,8,0.4)] ring-2 ring-yellow-500/20"
                 : isGlobalRank2
                   ? "border-slate-400 shadow-[0_0_15px_-5px_rgba(148,163,184,0.3)]"
                   : isGlobalRank3
@@ -835,8 +884,10 @@ function GalleryContent() {
                   ref={idx === images.length - 1 ? lastImageElementRef : null}
                   className={`group relative w-full aspect-[4/5] bg-zinc-900 rounded-[24px] md:rounded-[40px] overflow-hidden border transition-all duration-500 ${frameStyle}`}
                 >
-                  {/* Gold Glow for Rank 1 */}
-                  {isGlobalRank1 && <div className="absolute inset-0 bg-gradient-to-tr from-yellow-500/5 to-transparent pointer-events-none z-10" />}
+                  {/* Gold Glow Overlay for Rank 1 */}
+                  {isGlobalRank1 && (
+                    <div className="absolute inset-0 bg-gradient-to-tr from-yellow-500/10 to-transparent pointer-events-none z-10 animate-pulse" />
+                  )}
 
                   {/* Main Image */}
                   <img
@@ -846,85 +897,79 @@ function GalleryContent() {
                     alt={img.prompt}
                   />
 
-                  {/* ADMIN DELETE BUTTON - Only visible when isAdmin is true */}
-                  {isAdmin && (
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        adminDelete(img.id, img.creatorId);
-                      }}
-                      className="absolute top-4 right-14 z-50 p-2.5 bg-red-600 hover:bg-red-500 text-white rounded-2xl shadow-2xl transition-all active:scale-90 flex items-center gap-2 border border-red-400/50"
-                    >
-                      <Trash2 size={16} />
-                      <span className="text-[10px] font-black uppercase">Admin Delete</span>
-                    </button>
-                  )}
-
-                  {/* Small Private Indicator (Top Right) */}
-                  {img.creatorId === userId && img.isPrivate && (
-                    <div className="absolute top-2 right-2 bg-black/60 p-1 rounded-full z-20 md:hidden">
-                      <Lock size={14} className="text-yellow-500" />
-                    </div>
-                  )}
-
-                  {/* Badges (Top Left - Desktop/Global) */}
-                  {(isGlobalRank1 || isGlobalRank2 || isGlobalRank3) && (
-                    <div className={`absolute top-4 left-4 z-20 p-1.5 rounded-lg backdrop-blur-md border flex items-center gap-1.5 ${isGlobalRank1 ? 'bg-yellow-500/20 border-yellow-500/40 text-yellow-500' :
-                        isGlobalRank2 ? 'bg-slate-400/20 border-slate-400/40 text-slate-300' :
+                  {/* TOP UI LAYER */}
+                  <div className="absolute top-4 inset-x-4 flex justify-between items-start z-30">
+                    <div className="flex flex-col gap-2">
+                      {/* 1. BADGES (Rank) */}
+                      {(isGlobalRank1 || isGlobalRank2 || isGlobalRank3) && (
+                        <div className={`p-1.5 rounded-lg backdrop-blur-md border flex items-center gap-1.5 shadow-2xl ${
+                          isGlobalRank1 ? 'bg-yellow-500/20 border-yellow-500/40 text-yellow-500' :
+                          isGlobalRank2 ? 'bg-slate-400/20 border-slate-400/40 text-slate-300' :
                           'bg-orange-600/20 border-orange-600/40 text-orange-500'
-                      }`}>
-                      {isGlobalRank1 ? <Crown size={12} /> : <ShieldCheck size={12} />}
-                      <span className="text-[7px] font-black uppercase tracking-tighter">
-                        {isGlobalRank1 ? "Global King" : isGlobalRank2 ? "Elite" : "Master"}
-                      </span>
+                        }`}>
+                          {isGlobalRank1 ? <Crown size={12} /> : <ShieldCheck size={12} />}
+                          <span className="text-[7px] font-black uppercase tracking-tighter">
+                            {isGlobalRank1 ? "Global King" : isGlobalRank2 ? "Elite" : "Master"}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* 2. PRIVACY TOGGLE (If owner, shows below/beside badge) */}
+                      {isOwn && (
+                        <button
+                          onClick={(e) => togglePrivacy(e, img.id, !!img.isPrivate)}
+                          className={`p-2 md:p-2.5 rounded-xl backdrop-blur-xl border flex items-center gap-2 transition-all shadow-xl active:scale-90 ${
+                            img.isPrivate
+                              ? 'bg-orange-500/20 border-orange-500/40 text-orange-500'
+                              : 'bg-black/60 border-white/10 text-white hover:bg-indigo-600'
+                          }`}
+                        >
+                          {img.isPrivate ? <Lock size={14} /> : <Globe size={14} className="text-green-400" />}
+                          <span className="text-[8px] font-black uppercase tracking-tighter hidden md:block">
+                            {img.isPrivate ? 'Private' : 'Public'}
+                          </span>
+                        </button>
+                      )}
                     </div>
-                  )}
 
-                  {/* Privacy Toggle (Top Left) - Only shown to Owner */}
-                  {isOwn && (
-                    <button
-                      onClick={(e) => togglePrivacy(e, img.id, !!img.isPrivate)}
-                      className={`absolute top-4 left-4 z-30 p-2 md:p-2.5 rounded-xl backdrop-blur-xl border flex items-center gap-2 transition-all shadow-xl active:scale-90 ${img.isPrivate
-                          ? 'bg-orange-500/20 border-orange-500/40 text-orange-500'
-                          : 'bg-black/60 border-white/10 text-white hover:bg-indigo-600'
-                        }`}
-                    >
-                      {img.isPrivate ? <Lock size={14} /> : <Globe size={14} className="text-green-400" />}
-                      <span className="text-[8px] font-black uppercase tracking-tighter hidden md:block">
-                        {img.isPrivate ? 'Private' : 'Public'}
-                      </span>
-                    </button>
-                  )}
+                    {/* 3. LIKE BUTTON & ADMIN */}
+                    <div className="flex flex-col gap-2 items-end">
+                        <button
+                          onClick={(e) => handleLike(e, img)}
+                          className={`p-2.5 rounded-xl backdrop-blur-xl border border-white/10 flex items-center gap-2 transition-all ${
+                            profile?.likedImages?.includes(img.id) ? 'bg-red-500 border-red-400 text-white' : 'bg-black/60 text-white'
+                          }`}
+                        >
+                          <Heart size={14} fill={profile?.likedImages?.includes(img.id) ? "white" : "none"} />
+                          <span className="text-[10px] font-black">{img.likesCount || 0}</span>
+                        </button>
 
-                  {/* Like Button (Top Right) */}
-                  <div className="absolute top-4 right-4 z-20">
-                    <button
-                      onClick={(e) => handleLike(e, img)}
-                      className={`p-2.5 rounded-xl backdrop-blur-xl border border-white/10 flex items-center gap-2 transition-all ${profile?.likedImages?.includes(img.id) ? 'bg-red-500 border-red-400 text-white' : 'bg-black/60 text-white'}`}
-                    >
-                      <Heart size={14} fill={profile?.likedImages?.includes(img.id) ? "white" : "none"} />
-                      <span className="text-[10px] font-black">{img.likesCount || 0}</span>
-                    </button>
+                        {isAdmin && (
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); adminDelete(img.id, img.creatorId); }}
+                            className="p-2.5 bg-red-600 hover:bg-red-500 text-white rounded-xl shadow-2xl transition-all active:scale-90 flex items-center gap-2 border border-red-400/50"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                    </div>
                   </div>
 
                   {/* Bottom Info Overlay */}
-                  <div className="absolute inset-x-0 bottom-0 p-4 md:p-6 bg-gradient-to-t from-black via-black/95 to-transparent flex flex-col gap-3 translate-y-4 group-hover:translate-y-0 transition-all duration-300">
-                    
-                    {/* Creator Name Label */}
+                  <div className="absolute inset-x-0 bottom-0 p-4 md:p-6 bg-gradient-to-t from-black via-black/95 to-transparent flex flex-col gap-3 translate-y-4 group-hover:translate-y-0 transition-all duration-300 z-20">
                     <div className="flex items-center gap-2 px-1">
-                      <div className="w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center">
+                      <div className={`w-4 h-4 rounded-full flex items-center justify-center ${isGlobalRank1 ? 'bg-yellow-500' : 'bg-indigo-500'}`}>
                         <User size={8} className="text-white" />
                       </div>
-                      <p className="text-[9px] font-black text-indigo-400 uppercase tracking-tight">
+                      <p className={`text-[9px] font-black uppercase tracking-tight ${isGlobalRank1 ? 'text-yellow-500' : 'text-indigo-400'}`}>
                         {img.creatorName || 'Anonymous Creator'}
                       </p>
                     </div>
 
-                    {/* Action Buttons */}
                     <div className="flex gap-2">
                       <button
                         onClick={() => downloadImage(img)}
-                        className={`flex-1 py-2.5 rounded-lg text-[8px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 ${hasPrize ? 'bg-yellow-500 text-black' : 'bg-white text-black'}`}
+                        className={`flex-1 py-2.5 rounded-lg text-[8px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 ${hasPrize ? 'bg-yellow-500 text-black shadow-[0_0_15px_rgba(234,179,8,0.5)]' : 'bg-white text-black'}`}
                       >
                         {hasPrize ? <Gift size={14} /> : <Download size={14} />}
                         {hasPrize ? "No Watermark" : "Download"}
@@ -935,12 +980,6 @@ function GalleryContent() {
                       >
                         <Zap size={14} className="fill-white" />
                       </button>
-                    </div>
-
-                    {/* Prompt & Style Tag */}
-                    <div className="flex items-center justify-between opacity-60">
-                      <p className="text-[8px] font-bold italic line-clamp-1 truncate flex-1 text-zinc-400">"{img.prompt}"</p>
-                      <span className="text-[7px] font-black uppercase bg-white/10 px-1.5 py-0.5 rounded ml-2">{img.style || 'AI'}</span>
                     </div>
                   </div>
                 </div>
