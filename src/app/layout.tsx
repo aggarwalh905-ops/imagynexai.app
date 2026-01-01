@@ -17,7 +17,7 @@ export const metadata: Metadata = {
     siteName: "Imagynex AI",
     images: [
       {
-        url: "/og-image.jpg", // Agar aapke 'public' folder mein koi image hai toh uska path yahan dein
+        url: "/og-image.png", // Agar aapke 'public' folder mein koi image hai toh uska path yahan dein
         width: 1200,
         height: 630,
         alt: "Imagynex AI Preview",
@@ -29,7 +29,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Imagynex AI",
     description: "Create anything you can imagine with our Neural Engine.",
-    images: ["/og-image.jpg"],
+    images: ["/og-image.png"],
   },
   icons: {
     icon: "/favicon.ico", // Ensure karein ki 'public' folder mein favicon hai
