@@ -199,23 +199,27 @@ export default function AIStudio() {
       if (!saved) return;
 
       try {
-        // 2. Parsed data ko HistoryItem array ki tarah treat karein
         const parsedHistory: HistoryItem[] = JSON.parse(saved);
         
         const restoredHistory = await Promise.all(
           parsedHistory.map(async (item: HistoryItem) => {
-            // Check karein agar image private hai aur abhi tak blob URL nahi bana hai
-            if (item.isPrivate && item.url && !item.url.startsWith('blob:')) {
+            // Case 1: Agar URL pehle se ek permanent link (http) hai, toh kuch na karein
+            if (item.url && item.url.startsWith('http')) {
+              return item;
+            }
+
+            // Case 2: Agar URL missing hai ya blob error tha, toh IndexedDB se fetch karein
+            if (!item.url || item.url.startsWith('blob:')) {
               try {
                 const blob = await getImageOffline(item.id);
                 if (blob instanceof Blob) {
                   return { 
                     ...item, 
-                    url: URL.createObjectURL(blob) 
+                    url: URL.createObjectURL(blob) // Naya temporary link banayenge session ke liye
                   };
                 }
               } catch (err) {
-                console.error("Failed to restore private image:", item.id);
+                console.error("Offline image not found for:", item.id);
               }
             }
             return item;
@@ -593,53 +597,44 @@ export default function AIStudio() {
     const itemToDelete = history[index];
     if (!itemToDelete) return;
 
-    // Step 2: Confirm removal from phone
-    const confirmLocal = window.confirm("Remove this masterpiece from your history?");
+    // Step 2: Confirm removal from local history only
+    const confirmLocal = window.confirm("Remove this from your local history? (It will still remain in the Global Gallery)");
     
     if (confirmLocal) {
       try {
-        // --- EXECUTION: 1. LOCAL CLEANUP ---
-        
-        // Local State & LocalStorage se hatayen
+        // --- 1. LOCAL STATE & LOCALSTORAGE CLEANUP ---
+        // Humne sirf local list se filter kiya hai
         const updatedHistory = history.filter((_, i) => i !== index);
         setHistory(updatedHistory);
-        localStorage.setItem('imagynex_history', JSON.stringify(updatedHistory));
-
-        // --- EXECUTION: 2. INDEXEDDB CLEANUP (OFFLINE STORAGE) ---
         
-        // Agar image private hai, toh use IndexedDB se bhi delete karein
-        if (itemToDelete.isPrivate) {
-          try {
-            const localDB = (await openDB()) as IDBDatabase;
-            const tx = localDB.transaction("private_images", "readwrite");
-            const store = tx.objectStore("private_images");
-            
-            // ID use karke delete karein
-            const deleteRequest = store.delete(itemToDelete.id);
-            
-            deleteRequest.onsuccess = () => console.log("Offline binary deleted.");
-            deleteRequest.onerror = () => console.error("IndexedDB delete failed.");
-          } catch (dbErr) {
-            console.error("IndexedDB Access Error:", dbErr);
-          }
+        // LocalStorage ko update karein (Filtered version save karein)
+        const historyToSave = updatedHistory.map(item => ({
+          ...item,
+          url: item.url?.startsWith('blob:') ? null : item.url 
+        }));
+        localStorage.setItem('imagynex_history', JSON.stringify(historyToSave));
+
+        // --- 2. INDEXEDDB CLEANUP (OFFLINE BINARY) ---
+        // Agar image private storage mein hai, toh binary file bhi delete karein
+        try {
+          const localDB = (await openDB()) as IDBDatabase;
+          const tx = localDB.transaction("private_images", "readwrite");
+          const store = tx.objectStore("private_images");
+          
+          // Original ID use karke IndexedDB se delete karein
+          const deleteRequest = store.delete(itemToDelete.id);
+          
+          deleteRequest.onsuccess = () => console.log("Local binary cleared.");
+        } catch (dbErr) {
+          console.warn("IndexedDB already empty or access error:", dbErr);
         }
 
-        // --- EXECUTION: 3. CLOUD CLEANUP ---
-
-        if (firestoreId) {
-          const deleteFromCloud = window.confirm(
-            "This image is also in the Global Gallery.\n\nDelete from Database too? 'Cancel' will keep it in the gallery but remove it from your history."
-          );
-
-          if (deleteFromCloud) {
-            await deleteDoc(doc(db, "gallery", firestoreId));
-            setToast?.({ message: "Purged from Cloud & Local", type: 'success' });
-          }
-        }
+        // Success Toast (Database ka zikr nahi hoga)
+        setToast?.({ message: "Removed from local history", type: 'success' });
 
       } catch (error) {
-        console.error("Critical Removal Error:", error);
-        alert("Something went wrong during deletion.");
+        console.error("Removal Error:", error);
+        alert("Failed to remove from local history.");
       }
     }
   };
@@ -647,26 +642,25 @@ export default function AIStudio() {
   // --- SEARCH FOR generateImage FUNCTION IN YOUR CODE AND UPDATE IT ---
 
   const generateImage = async (overrideSeed?: number) => {
-    // Ensure we have a prompt before proceeding
     if (!prompt) return;
 
     setLoading(true);
     setSaveStatus(null);
     setError(null);
 
-    // Inside generateImage:
     const auth = getAuth();
     if (!auth.currentUser) {
         await signInAnonymously(auth);
     }
 
-    // 1. Get UID and Fetch Profile Name
+    // 1. UID Handling
     let storedUid = localStorage.getItem('imagynex_uid');
     if (!storedUid) {
       storedUid = 'u_' + Math.random().toString(36).substr(2, 9);
       localStorage.setItem('imagynex_uid', storedUid);
     }
 
+    // 2. User Profile Fetch
     let currentDisplayName = "Artist";
     try {
       const userDoc = await getDoc(doc(db, "users", storedUid));
@@ -677,7 +671,7 @@ export default function AIStudio() {
       console.error("User fetch error:", err);
     }
 
-    // Handle Seed Logic
+    // 3. Seed & Aspect Ratio Logic
     const finalSeed = overrideSeed !== undefined
       ? overrideSeed
       : (seed !== "" ? Number(seed) : Math.floor(Math.random() * 1000000));
@@ -686,7 +680,6 @@ export default function AIStudio() {
       setSeed(finalSeed);
     }
 
-    // Aspect Ratio Logic
     let w = 1024, h = 1024;
     if (ratio === "16:9") { w = 1280; h = 720; }
     if (ratio === "9:16") { w = 720; h = 1280; }
@@ -694,8 +687,6 @@ export default function AIStudio() {
     const styleSuffix = styles.find(s => s.name === selectedStyle)?.suffix || "";
     const fullPrompt = `${prompt}${styleSuffix}`;
 
-    // 2. Request through your SECURE proxy 
-    // ADDED: &negative_prompt parameter
     const proxyUrl = `/api/generate?prompt=${encodeURIComponent(fullPrompt)}&negative_prompt=${encodeURIComponent(negativePrompt || "")}&width=${w}&height=${h}&model=zimage&seed=${finalSeed}&nologo=true&enhance=true&t=${Date.now()}`;
 
     try {
@@ -713,27 +704,22 @@ export default function AIStudio() {
 
       const entryId = `img_${Date.now()}`;
 
-      // --- 1. GET ACCURATE AUTH ID ---
-      // Hum hamesha Firebase Auth ki UID use karenge rule mismatch se bachne ke liye
-      const auth = getAuth();
-      const actualFirebaseUid = storedUid; 
-
-      // 2. Prepare history entry
+      // --- INITIAL ENTRY OBJECT ---
+      // 'let' use kiya hai taaki properties baad mein update ho sakein
       let newEntry: any = {
         id: entryId, 
-        url: objectURL, 
+        url: objectURL, // Active session ke liye blob URL
         prompt: fullPrompt,
         seed: finalSeed,
         ratio,
         model: "zimage",
         timestamp: Date.now(),
-        firestoreId: null,
+        firestoreId: null, // Default null
         isPrivate: !isPublic 
       };
 
-      // 3. --- FIREBASE SAVE ---
+      // 4. --- FIREBASE & OFFLINE SAVE ---
       try {
-        // Gallery Doc Create
         const docRef = await addDoc(collection(db, "gallery"), {
           imageUrl: proxyUrl, 
           prompt: fullPrompt,
@@ -742,43 +728,52 @@ export default function AIStudio() {
           ratio: ratio,
           model: "zimage",
           createdAt: serverTimestamp(),
-          creatorId: actualFirebaseUid, // FIX: Yahan Auth UID ja rahi hai
+          creatorId: storedUid,
           creatorName: currentDisplayName,
           likesCount: 0,
           likedBy: [],
           isPrivate: !isPublic 
         });
 
-        // User Profile Update using localStorage ID
-        const userRef = doc(db, "users", storedUid); // Use storedUid directly
+        // SAFE PROPERTY ASSIGNMENT: Checking if docRef exists
+        if (docRef && docRef.id) {
+            newEntry.firestoreId = docRef.id;
+        }
+
+        const userRef = doc(db, "users", storedUid);
         await setDoc(userRef, {
           totalCreations: increment(1),
           displayName: currentDisplayName,
           lastActive: serverTimestamp(),
-          lastLoginId: storedUid 
         }, { merge: true });
 
-        newEntry.firestoreId = docRef.id;
         setSaveStatus(isPublic ? 'cloud' : 'private');
 
-        // 4. --- OFFLINE BACKUP ---
-        if (!isPublic) {
-          try {
-            await saveImageOffline(entryId, blob);
-          } catch (e) {
-            console.error("Offline backup failed:", e);
-          }
+        // OFFLINE BACKUP (IndexedDB)
+        try {
+          await saveImageOffline(entryId, blob);
+        } catch (e) {
+          console.error("Offline backup failed:", e);
         }
 
       } catch (e) {
         console.error("Firebase Database Save Error:", e);
+        newEntry.firestoreId = "not_saved"; // Property exist karegi error mode mein bhi
         setSaveStatus('local');
       }
 
-      // 5. Update UI History
-      const updatedHistory = [newEntry, ...history].slice(0, 15);
-      setHistory(updatedHistory);
-      localStorage.setItem('imagynex_history', JSON.stringify(updatedHistory));
+      // --- 5. FINAL HISTORY SYNC ---
+      // UI state mein blob URL rakhenge taaki image dikhti rahe
+      const currentFullHistory = [newEntry, ...history].slice(0, 15);
+      setHistory(currentFullHistory);
+
+      // LocalStorage ke liye 'url' ko null karenge taaki refresh par crash na ho
+      const historyToStore = currentFullHistory.map(item => ({
+        ...item,
+        url: (item.url && item.url.startsWith('blob:')) ? null : item.url 
+      }));
+
+      localStorage.setItem('imagynex_history', JSON.stringify(historyToStore));
 
     } catch (err: any) {
       setLoading(false);
