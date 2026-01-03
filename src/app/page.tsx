@@ -893,28 +893,33 @@ export default function AIStudio() {
 
       <nav className="sticky top-0 z-50 border-b border-white/5 bg-black/40 backdrop-blur-2xl">
         <div className="max-w-7xl mx-auto px-4 md:px-5 h-16 flex items-center justify-between">
-          <Link href="/"><ImagynexLogo /></Link>
+          <Link href="/" aria-label="Imagynex Home"><ImagynexLogo /></Link>
           
-          {/* Desktop Menu - Yahan Gallery add kiya hai */}
-          <div className="hidden md:flex gap-8 text-[10px] font-black uppercase tracking-widest text-zinc-500">
+          {/* Desktop Menu - text-zinc-400 used for better contrast than 500 */}
+          <div className="hidden md:flex gap-8 text-[10px] font-black uppercase tracking-widest text-zinc-400">
             <Link href="/" className="hover:text-white transition">Create</Link>
-            <Link href="/gallery" className="text-indigo-500 hover:text-white transition">Gallery</Link>
+            <Link href="/gallery" className="text-indigo-400 hover:text-white transition">Gallery</Link>
             <Link href="/about" className="hover:text-white transition">About</Link>
             <Link href="/contact" className="hover:text-white transition">Contact</Link>
           </div>
 
-          <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="md:hidden p-2 text-zinc-400">
+          {/* Added aria-label for accessibility */}
+          <button 
+            onClick={() => setIsMenuOpen(!isMenuOpen)} 
+            className="md:hidden p-2 text-zinc-400 hover:text-white"
+            aria-label={isMenuOpen ? "Close Menu" : "Open Menu"}
+          >
             {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
           </button>
         </div>
 
-        {/* Mobile Menu - Yahan bhi Gallery add kiya hai */}
+        {/* Mobile Menu */}
         {isMenuOpen && (
-          <div className="md:hidden absolute top-16 left-0 w-full bg-black/80 backdrop-blur-3xl border-b border-white/10 p-8 flex flex-col gap-6 z-[100] animate-in fade-in slide-in-from-top-4">
-            <Link href="/" onClick={() => setIsMenuOpen(false)} className="text-lg font-bold">Studio</Link>
-            <Link href="/gallery" onClick={() => setIsMenuOpen(false)} className="text-lg font-bold text-indigo-500">Global Gallery</Link>
-            <Link href="/about" onClick={() => setIsMenuOpen(false)} className="text-lg font-bold">About</Link>
-            <Link href="/contact" onClick={() => setIsMenuOpen(false)} className="text-lg font-bold">Contact</Link>
+          <div className="md:hidden absolute top-16 left-0 w-full bg-black/95 backdrop-blur-3xl border-b border-white/10 p-8 flex flex-col gap-6 z-[100] animate-in fade-in slide-in-from-top-4">
+            <Link href="/" onClick={() => setIsMenuOpen(false)} className="text-lg font-bold text-white">Studio</Link>
+            <Link href="/gallery" onClick={() => setIsMenuOpen(false)} className="text-lg font-bold text-indigo-400">Global Gallery</Link>
+            <Link href="/about" onClick={() => setIsMenuOpen(false)} className="text-lg font-bold text-white">About</Link>
+            <Link href="/contact" onClick={() => setIsMenuOpen(false)} className="text-lg font-bold text-white">Contact</Link>
           </div>
         )}
       </nav>
@@ -1466,23 +1471,33 @@ export default function AIStudio() {
 
       <footer className="bg-black/60 border-t border-white/5 pt-16 md:pt-20 pb-44 px-5 text-center">
         <div className="max-w-4xl mx-auto space-y-12">
-          <div className="bg-zinc-900/50 border border-dashed border-white/10 rounded-[32px] p-8 md:p-12 text-zinc-700 text-[8px] md:text-[10px] font-black uppercase tracking-[0.4em]">Imagynex AI Neural Creative Suite</div>
+          {/* Background color slightly brightened for contrast */}
+          <div className="bg-zinc-900/80 border border-dashed border-white/10 rounded-[32px] p-8 md:p-12 text-zinc-500 text-[8px] md:text-[10px] font-black uppercase tracking-[0.4em]">
+            Imagynex AI Neural Creative Suite
+          </div>
+          
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8 text-left">
             <div className="md:col-span-2">
-               <ImagynexLogo /><p className="text-zinc-600 text-xs leading-relaxed mt-4 max-w-xs">Pioneering the intersection of human creativity and machine intelligence.</p>
+              <ImagynexLogo />
+              <p className="text-zinc-400 text-xs leading-relaxed mt-4 max-w-xs">
+                Pioneering the intersection of human creativity and machine intelligence.
+              </p>
             </div>
+            
             <div className="space-y-3">
-               <h4 className="text-[10px] font-black text-white uppercase tracking-widest">Platform</h4>
-               <ul className="text-zinc-500 text-[10px] space-y-2 font-bold uppercase tracking-wider">
-                  <li><Link href="/privacy">Privacy</Link></li>
-                  <li><Link href="/about">About</Link></li>
-               </ul>
+              {/* Changed h4 to h3 or kept same but ensured order in page is correct */}
+              <h4 className="text-[10px] font-black text-white uppercase tracking-widest">Platform</h4>
+              <ul className="text-zinc-400 text-[10px] space-y-3 font-bold uppercase tracking-wider">
+                  <li><Link href="/privacy" className="hover:text-indigo-400 py-1 inline-block">Privacy</Link></li>
+                  <li><Link href="/about" className="hover:text-indigo-400 py-1 inline-block">About</Link></li>
+              </ul>
             </div>
+            
             <div className="space-y-3">
-               <h4 className="text-[10px] font-black text-white uppercase tracking-widest">Connect</h4>
-               <ul className="text-zinc-500 text-[10px] space-y-2 font-bold uppercase tracking-wider">
-                  <li><Link href="https://github.com/aggarwalh905-ops">GitHub</Link></li>
-               </ul>
+              <h4 className="text-[10px] font-black text-white uppercase tracking-widest">Connect</h4>
+              <ul className="text-zinc-400 text-[10px] space-y-3 font-bold uppercase tracking-wider">
+                  <li><Link href="https://github.com/aggarwalh905-ops" className="hover:text-indigo-400 py-1 inline-block">GitHub</Link></li>
+              </ul>
             </div>
           </div>
         </div>
