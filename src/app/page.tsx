@@ -728,7 +728,11 @@ export default function AIStudio() {
       if (!response.ok) throw new Error("Server Error");
 
       const blob = await response.blob();
+
+      // Add this to see what is actually inside the "small" file
       if (blob.size < 50000) {
+        const text = await blob.text(); 
+        console.error("Actual response content:", text);
         throw new Error("Authentication failed or engine error.");
       }
 
