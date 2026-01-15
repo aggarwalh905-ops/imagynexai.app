@@ -19,12 +19,13 @@ export async function GET(request: NextRequest) {
     const negPart = negative ? `&negative_prompt=${encodeURIComponent(negative)}` : "";
     
     // Final URL Construction
-    const pollinationsUrl = `https://gen.pollinations.ai/image/${encodeURIComponent(prompt)}?width=${width}&height=${height}&seed=${seed}&model=${model}&nologo=true&enhance=true${negPart}`;
-
+    const pollinationsUrl = `https://gen.pollinations.ai/image/${encodeURIComponent(prompt)}?width=${width}&height=${height}&seed=${seed}&model=${model}&nologo=true&enhance=true&referrer=imagynex${negPart}`;
+    
     const response = await fetch(pollinationsUrl, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${process.env.POLLINATIONS_API_KEY}`,
+        'Referer': 'https://imagynexai.vercel.app',
       },
       cache: 'no-store'
     });

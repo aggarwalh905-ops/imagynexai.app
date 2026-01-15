@@ -721,7 +721,8 @@ export default function AIStudio() {
     const styleSuffix = styles.find(s => s.name === selectedStyle)?.suffix || "";
     const fullPrompt = `${prompt}${styleSuffix}`;
 
-    const proxyUrl = `/api/generate?prompt=${encodeURIComponent(fullPrompt)}&negative_prompt=${encodeURIComponent(negativePrompt || "")}&width=${w}&height=${h}&model=${model}&seed=${finalSeed}&nologo=true&enhance=true&t=${Date.now()}`;
+    // Global Feed enable karne ke liye 'feed=true' add kiya
+    const proxyUrl = `/api/generate?prompt=${encodeURIComponent(fullPrompt)}&negative_prompt=${encodeURIComponent(negativePrompt || "")}&width=${w}&height=${h}&model=${model}&seed=${finalSeed}&nologo=true&enhance=true&feed=true&t=${Date.now()}`;
 
     try {
       const response = await fetch(proxyUrl);
