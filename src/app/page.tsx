@@ -19,9 +19,6 @@ import {
   where, 
 } from "firebase/firestore";
 
-// import { db } from "./your-firebase-config-file";
-// Ensure 'db' is also imported from your firebase config file
-
 // --- FIREBASE IMPORTS ---
 import { db } from "@/lib/firebase";
 import { 
@@ -323,48 +320,52 @@ export default function AIStudio() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
 
-  const handlePuterChat = async () => {
-    if (!chatInput) return;
-    setLoading(true); // Loading state on karein
-    try {
-      // @ts-ignore
-      const response = await puter.ai.chat(
-        `Act as a professional prompt engineer. Convert this idea into a concise, high-impact image generation prompt (max 25 words). Focus on lighting, style, and quality. Idea: ${chatInput}`
-      );
-
-      setPrompt(response.toString().trim()); // response ko clean karke set karein
-      // Seedha main prompt box mein text daalna
-      setPrompt(response.toString());
-      setIsChatOpen(false); // Chat band
-      setChatInput(""); // Input clear
-    } catch (err) {
-      console.error("Puter Error:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const enhancePrompt = async () => {
-    if (!prompt) return;
-    setEnhancing(true);
-    try {
-      // System instructions add ki gayi hain taaki AI extra baatein na kare
-      const systemInstruction = "Master AI Artist. Rewrite the user prompt into a high-detail cinematic masterpiece. Add specific lighting (e.g. volumetric, 8k), camera lens (e.g. 35mm), and textures. Keep it under 60 words. Return ONLY the prompt.";
-      const encodedPrompt = encodeURIComponent(`${systemInstruction} \n\nUser Prompt: ${prompt}`);
+    if (!prompt) return;
+    setEnhancing(true);
+
+    try {
+      const systemInstruction = "Master AI Artist. Rewrite the user prompt into a high-detail cinematic masterpiece. Add specific lighting (e.g. volumetric, 8k), camera lens (e.g. 35mm), and textures. Keep it under 60 words. Return ONLY the prompt.";
+
+      const response = await fetch("https://gen.pollinations.ai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.NEXT_PUBLIC_POLLINATIONS_API_KEY}`
+        },
+        body: JSON.stringify({
+          // Model set to Amazon Nova Micro
+          model: "nova-fast", 
+          messages: [
+            { role: "system", content: systemInstruction },
+            { role: "user", content: prompt }
+          ],
+          // Ensuring we don't get conversational filler
+          temperature: 0.7 
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`API Error: ${response.status}`);
+      }
+
+      const data = await response.json();
       
-      // NEW WAY
-      const response = await fetch(`https://enter.pollinations.ai/prompt/${encodeURIComponent(encodedPrompt)}`);
-      let data = await response.text();
-      
-      // Cleaning: Agar AI phir bhi quotes ya "Prompt:" likh de toh use remove karne ke liye
-      data = data.replace(/^(Prompt:|Improved Prompt:|")|"$|^\s+|\s+$/g, '');
-      
-      setPrompt(data.trim());
-    } catch (error) { 
-      console.error("Enhancement failed:", error); 
+      // Extracting the text from the OpenAI-compatible JSON structure
+      let enhancedText = data.choices[0].message.content;
+
+      // Cleaning: Remove quotes or "Prompt:" if the AI included them
+      enhancedText = enhancedText.replace(/^(Prompt:|Improved Prompt:|")|"$|^\s+|\s+$/g, '');
+
+      setPrompt(enhancedText.trim());
+
+    } catch (error) {
+      console.error("Enhancement failed:", error);
+    } finally {
+      setEnhancing(false);
     }
-    finally { setEnhancing(false); }
-  };
+  };
 
   const applyMagicPrompt = () => {
     const modifiers = [
@@ -947,14 +948,7 @@ export default function AIStudio() {
                     <span className="hidden xs:inline">Magic</span>
                   </button>
 
-                  {/* 2. Puter AI Assistant Trigger */}
-                  {/* In-line Assistant Trigger */}
-                  <button onClick={() => setIsChatOpen(true)} className="flex items-center gap-1.5 text-[9px] md:text-[10px] font-black text-amber-400 uppercase tracking-widest hover:text-amber-300 transition">
-                    <MessageSquareText size={12} />
-                    <span className="hidden xs:inline">Assistant</span>
-                  </button>
-
-                  {/* <button 
+                  <button 
                     onClick={enhancePrompt} 
                     disabled={enhancing || !prompt}
                     className="flex items-center gap-1.5 text-[9px] md:text-[10px] font-black text-indigo-400 uppercase hover:text-indigo-300 transition disabled:opacity-30"
@@ -965,7 +959,7 @@ export default function AIStudio() {
                       <Wand2 size={12} />
                     )}
                     <span className="hidden xs:inline">{enhancing ? "Refining..." : "Enhance"}</span>
-                  </button> */}
+                  </button>
 
                   {/* 3. Copy Button */}
                   <button onClick={handleCopy} disabled={!prompt} className="flex items-center gap-1.5 text-[9px] md:text-[10px] font-black text-zinc-400 uppercase tracking-widest hover:text-white disabled:opacity-20 transition">
@@ -1179,6 +1173,7 @@ export default function AIStudio() {
           </div>
 
           <div className="flex flex-col gap-2">
+            {/* Save Status Header */}
             <div className="flex justify-end h-6">
               {saveStatus && (
                 <div className={`text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full animate-in fade-in zoom-in duration-300 ${saveStatus === 'cloud' ? 'text-green-400 bg-green-500/10' : 'text-amber-400 bg-amber-500/10'}`}>
@@ -1186,81 +1181,75 @@ export default function AIStudio() {
                 </div>
               )}
             </div>
+
+            {/* Main Canvas / Image Display */}
             <div id="canvas" className="relative rounded-[24px] md:rounded-[48px] overflow-hidden border border-white/5 bg-zinc-900/30 aspect-square md:aspect-video flex items-center justify-center group shadow-2xl transition-all">
-            {image ? (
-              <div className="w-full h-full relative">
-                <img 
-                  src={image} 
-                  loading="eager"
-                  onError={(e) => {
-                    // Fallback if the image URL fails
-                    e.currentTarget.src = "https://placehold.co/1024x1024/09090b/4f46e5?text=Signal+Lost";
-                  }}
-                  className={`w-full h-full object-contain transition-all duration-700 ${
-                    loading ? 'blur-2xl scale-95 opacity-50' : 'blur-0 scale-100 opacity-100'
-                  }`} 
-                  alt="Neural Result" 
-                />
-                
-                {!loading && (
-                  <div className="absolute inset-0 bg-black/40 md:opacity-0 group-hover:opacity-100 transition-all flex flex-col md:flex-row items-center justify-center gap-3 p-6">
-                    <button 
-                      onClick={() => downloadImage(image)} 
-                      className="w-full md:w-auto bg-white text-black px-8 py-4 rounded-full font-black text-[10px] tracking-widest flex items-center justify-center gap-2 hover:scale-105 transition shadow-2xl uppercase"
-                    >
-                      <Download size={18}/> Download
-                    </button>
-                    
-                    {/* <button 
-                      onClick={shareProject}
-                      disabled={!image || loading}
-                      className={`w-full md:w-auto px-8 py-4 rounded-full font-black text-[10px] tracking-widest flex items-center justify-center gap-2 transition shadow-2xl uppercase ${
-                        !image || loading 
-                          ? "opacity-50 cursor-not-allowed bg-zinc-800" 
-                          : "bg-zinc-900/80 backdrop-blur-md text-white border border-white/10 hover:bg-zinc-800"
-                      }`}
-                    >
-                      {loading ? (
-                        <Loader2 size={18} className="animate-spin text-indigo-400" />
-                      ) : (
-                        <Share2 size={18} className="text-indigo-400" />
-                      )}
-                      {loading ? "Preparing File..." : "Share Masterpiece"}
-                    </button> */}
+              
+              {/* Image State */}
+              {image ? (
+                <div className="w-full h-full relative">
+                  <img 
+                    src={image} 
+                    loading="eager"
+                    onError={(e) => {
+                      e.currentTarget.src = "https://placehold.co/1024x1024/09090b/4f46e5?text=Signal+Lost";
+                    }}
+                    className={`w-full h-full object-contain transition-all duration-700 ${
+                      loading ? 'blur-2xl scale-95 opacity-50' : 'blur-0 scale-100 opacity-100'
+                    }`} 
+                    alt="Neural Result" 
+                  />
+                  
+                  {/* Buttons: Image banne ke baad hi dikhenge */}
+                  {!loading && (
+                    <div className="absolute inset-0 bg-black/40 md:opacity-0 group-hover:opacity-100 transition-all flex flex-col md:flex-row items-center justify-center gap-3 p-6">
+                      <button 
+                        onClick={() => downloadImage(image)} 
+                        className="w-full md:w-auto bg-white text-black px-8 py-4 rounded-full font-black text-[10px] tracking-widest flex items-center justify-center gap-2 hover:scale-105 transition shadow-2xl uppercase"
+                      >
+                        <Download size={18}/> Download
+                      </button>
 
-                    <button 
-                      onClick={() => generateImage(Math.floor(Math.random()*999999))} 
-                      className="w-full md:w-auto bg-indigo-600 text-white px-8 py-4 rounded-full font-black text-[10px] tracking-widest flex items-center justify-center gap-2 hover:scale-105 transition shadow-2xl backdrop-blur-md uppercase"
-                    >
-                      <RefreshCw size={16}/> New Variant
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              /* 10/10 Blueprint Empty State */
-              <div className="text-center p-10 relative overflow-hidden w-full h-full flex items-center justify-center">
-                {/* Subtle Neural Grid Background */}
-                <div className="absolute inset-0 opacity-[0.03] [background-image:linear-gradient(to_right,#808080_1px,transparent_1px),linear-gradient(to_bottom,#808080_1px,transparent_1px)] [background-size:40px_40px]" />
-                
-                <div className="relative z-10">
-                  <div className="w-20 h-20 bg-indigo-500/5 rounded-full flex items-center justify-center mx-auto mb-6 border border-indigo-500/10 animate-pulse">
-                    <ImageIcon size={32} className="text-indigo-500/40" />
-                  </div>
-                  <p className="text-zinc-400 font-black uppercase tracking-[0.3em] text-[10px]">
-                    Awaiting Neural Input
-                  </p>
+                      <button 
+                        onClick={() => generateImage(Math.floor(Math.random()*999999))} 
+                        className="w-full md:w-auto bg-indigo-600 text-white px-8 py-4 rounded-full font-black text-[10px] tracking-widest flex items-center justify-center gap-2 hover:scale-105 transition shadow-2xl backdrop-blur-md uppercase"
+                      >
+                        <RefreshCw size={16}/> New Variant
+                      </button>
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
+              ) : (
+                /* Awaiting Input State (Default) */
+                <div className="text-center p-10 relative overflow-hidden w-full h-full flex items-center justify-center">
+                  <div className="absolute inset-0 opacity-[0.03] [background-image:linear-gradient(to_right,#808080_1px,transparent_1px),linear-gradient(to_bottom,#808080_1px,transparent_1px)] [background-size:40px_40px]" />
+                  
+                  <div className="relative z-10">
+                    <div className="w-20 h-20 bg-indigo-500/5 rounded-full flex items-center justify-center mx-auto mb-6 border border-indigo-500/10 animate-pulse">
+                      <ImageIcon size={32} className="text-indigo-500/40" />
+                    </div>
+                    <p className="text-zinc-400 font-black uppercase tracking-[0.3em] text-[10px]">
+                      Awaiting Neural Input
+                    </p>
+                  </div>
+                </div>
+              )}
 
-            {/* High-Z-Index Loader Overlay */}
-            {loading && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-2xl z-[30]">
-                <VisionaryLoader />
-              </div>
-            )}
-          </div>
+              {/* High-Z-Index Visionary Loader Overlay */}
+              {loading && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 backdrop-blur-2xl z-[30] animate-in fade-in duration-300">
+                  <VisionaryLoader />
+                  
+                  {/* Futuristic Dynamic Loading Message */}
+                  <div className="mt-8 text-center">
+                      <p className="text-[10px] font-black uppercase tracking-[0.4em] text-indigo-400 animate-pulse">
+                          {loadingMessage}
+                      </p>
+                      <div className="w-32 h-[1px] bg-gradient-to-r from-transparent via-indigo-500/50 to-transparent mt-2 mx-auto" />
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {history.length > 0 && (
@@ -1391,40 +1380,6 @@ export default function AIStudio() {
         </div>
 
         {/* --- GLOBAL UI COMPONENTS (Always placed at the end of Main) --- */}
-  
-        {/* --- FLOATING CHAT UI --- */}
-        <button onClick={() => setIsChatOpen(true)} className="fixed bottom-24 right-6 z-50 p-4 bg-indigo-600 rounded-full shadow-[0_0_20px_rgba(79,70,229,0.5)] hover:scale-110 active:scale-95 transition-all md:bottom-10">
-          <MessageSquareText size={24} className="text-white" />
-        </button>
-
-        {isChatOpen && (
-          <>
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60]" onClick={() => setIsChatOpen(false)} />
-            <div className="fixed z-[70] bottom-0 left-0 right-0 h-[50vh] bg-zinc-900 border-t border-white/10 rounded-t-[32px] p-6 md:top-0 md:right-0 md:left-auto md:w-[350px] md:h-full md:rounded-none md:border-l animate-in slide-in-from-bottom md:slide-in-from-right">
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="text-xs font-black uppercase text-indigo-400">Imagynex Nexus AI</h3>
-                <button onClick={() => setIsChatOpen(false)}><X size={20}/></button>
-              </div>
-
-              <div className="space-y-4">
-                <textarea 
-                  value={chatInput} 
-                  onChange={(e) => setChatInput(e.target.value)} 
-                  placeholder="What's your idea?" 
-                  className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-sm h-32 outline-none focus:border-indigo-500 text-white"
-                />
-                <button 
-                  onClick={handlePuterChat} 
-                  disabled={loading || !chatInput}
-                  className="w-full py-4 bg-white text-black font-black rounded-2xl text-[10px] tracking-widest uppercase hover:bg-indigo-600 hover:text-white transition-all flex items-center justify-center gap-2"
-                >
-                  {loading ? <Loader2 className="animate-spin" size={14} /> : <Sparkles size={14} />}
-                  {loading ? "Optimizing..." : "Generate & Close"}
-                </button>
-              </div>
-            </div>
-          </>
-        )}
 
         {toast && (
           <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[100] animate-in fade-in slide-in-from-bottom-4 duration-300">

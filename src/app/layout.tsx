@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Analytics } from "@vercel/analytics/react";
 import { GoogleAnalytics } from '@next/third-parties/google';
-import Script from 'next/script';
 
 const baseUrl = "https://imagynexai.vercel.app";
 
@@ -59,15 +58,7 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <head>
         {/* DNS Prefetch & Preconnect: Network latency kam karne ke liye */}
-        <link rel="preconnect" href="https://api.puter.com" />
         <link rel="preconnect" href="https://firestore.googleapis.com" />
-        <link rel="preconnect" href="https://js.puter.com" />
-        
-        {/* Performance Fix: Puter.com ko 'afterInteractive' kiya taaki page jaldi load ho */}
-        <Script 
-          src="https://js.puter.com/v2/" 
-          strategy="afterInteractive" 
-        />
       </head>
       <body className="bg-black antialiased selection:bg-indigo-500/30">
         {children}
