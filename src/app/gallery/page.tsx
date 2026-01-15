@@ -9,10 +9,12 @@ import {
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
-  Download, Search, Sparkles, Share2, ArrowLeft,
+  Download, Search, Sparkles, UserMinus, Share2, ArrowLeft,
   User, Heart, Users, LayoutGrid, Trophy, Edit3, Check, Zap, Eye, Flame, Crown, Medal, TrendingUp, Gift, Info, Star, ShieldCheck, BadgeCheck, Lock, Globe
 } from 'lucide-react';
 import DownloadButton from "@/lib/DownloadButton";
+
+import AdminInbox from "@/lib/AdminInbox";
 
 import { deleteDoc } from "firebase/firestore"; // Add this to your firestore imports
 import { Trash2 } from 'lucide-react'; // Add this to your lucide imports
@@ -367,13 +369,8 @@ function GalleryContent() {
     if (activeFilter === "Liked") {
       const likedIds = profile?.likedImages || [];
       if (likedIds.length > 0) {
-        // Hum 100 images tak fetch kar rahe hain (Firestore limit 30 hai "in" query ki, 
-        // isliye agar 30 se zyada hain toh hum manually filter wala logic use karenge)
         if (likedIds.length <= 30) {
           constraints.push(where("__name__", "in", likedIds));
-        } else {
-          // Agar 30 se zyada hain, toh saari public fetch karke client-side filter karenge
-          // No extra constraints needed here, filtering inside onSnapshot
         }
       } else {
         setImages([]);
@@ -401,10 +398,18 @@ function GalleryContent() {
     const unsub = onSnapshot(q, (snap) => {
       let fetchedImages = snap.docs.map(d => ({ id: d.id, ...d.data() } as GalleryImage));
 
-      // Client-side Filter for Liked (if > 30) and Privacy
+      // --- UPDATED CLIENT-SIDE FILTER ---
       fetchedImages = fetchedImages.filter(img => {
+        // 1. If viewing liked tab, only show images in liked list
         if (activeFilter === "Liked") return profile?.likedImages?.includes(img.id);
+        
+        // 2. If viewing 'My Studio', show everything (even your own private ones)
         if (showMyCreations) return true;
+
+        // 3. NEW: If user is ADMIN, show EVERYTHING (Public + Private)
+        if (isAdmin) return true;
+
+        // 4. Regular users only see public images
         return img.isPrivate !== true;
       });
 
@@ -413,7 +418,7 @@ function GalleryContent() {
         fetchedImages.sort((a, b) => {
           const indexA = profile.likedImages.indexOf(a.id);
           const indexB = profile.likedImages.indexOf(b.id);
-          return indexB - indexA; // Latest liked (higher index) comes first
+          return indexB - indexA;
         });
       }
 
@@ -430,7 +435,8 @@ function GalleryContent() {
     });
 
     return () => unsub();
-  }, [mounted, activeFilter, showMyCreations, userId, searchQuery, profile?.likedImages]);
+    // Added isAdmin to dependencies so it refreshes when admin logs in
+  }, [mounted, activeFilter, showMyCreations, userId, searchQuery, profile?.likedImages, isAdmin]);
 
   // --- 2. LOAD MORE FUNCTION ---
   const loadMore = async () => {
@@ -449,16 +455,15 @@ function GalleryContent() {
       constraints.push(where("creatorId", "==", artistIdFromUrl));
     }
 
-    // 2. Category Style Filter (Excluding special tabs)
+    // 2. Category Style Filter
     if (activeFilter !== "All" && activeFilter !== "Trending" && activeFilter !== "Liked" && !showMyCreations && !artistIdFromUrl) {
       constraints.push(where("style", "==", activeFilter));
     }
 
-    // 3. Sorting Constraints (Essential for startAfter to work)
+    // 3. Sorting Constraints
     if (activeFilter === "Trending") {
       constraints.push(orderBy("likesCount", "desc"));
     } else {
-      // Liked filter aur baaki sab ke liye createdAt use hoga
       constraints.push(orderBy("createdAt", "desc"));
     }
 
@@ -475,22 +480,26 @@ function GalleryContent() {
       if (!snap.empty) {
         let newImages = snap.docs.map(d => ({ id: d.id, ...d.data() } as GalleryImage));
 
-        // 4. Strict Client-side Filtering
+        // 4. UPDATED: Strict Client-side Filtering for Admin
         newImages = newImages.filter(img => {
           // Liked Tab Logic
           if (activeFilter === "Liked") {
             return profile?.likedImages?.includes(img.id);
           }
           
-          // My Studio Logic
+          // My Studio Logic (Show own private images)
           if (showMyCreations) return true;
 
-          // Public/Private Logic
+          // NEW: Admin Override Logic
+          // If user is admin, they skip the privacy check
+          if (isAdmin) return true;
+
+          // Public/Private Logic for regular users
           if (img.isPrivate === true) return false;
           return true;
         });
 
-        // 5. Search Filter (agar user ne search query likhi hai)
+        // 5. Search Filter
         if (searchQuery.trim() !== "") {
           newImages = newImages.filter(img =>
             img.prompt.toLowerCase().includes(searchQuery.toLowerCase())
@@ -500,7 +509,7 @@ function GalleryContent() {
         setImages(prev => {
           const combined = [...prev, ...newImages];
           
-          // 6. Recently Liked Sorting (Load More data ke liye bhi apply hoga)
+          // 6. Recently Liked Sorting
           if (activeFilter === "Liked" && profile?.likedImages) {
             return combined.sort((a, b) => {
               const idxA = profile.likedImages.indexOf(a.id);
@@ -613,6 +622,44 @@ function GalleryContent() {
     }
   };
 
+  const nukeUserImages = async (targetUserId: string) => {
+    if (!targetUserId) {
+      alert("Error: No User ID found for this asset.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      // 1. Find all documents where creatorId matches
+      const galleryRef = collection(db, "gallery");
+      const q = query(galleryRef, where("creatorId", "==", targetUserId));
+      const snap = await getDocs(q);
+
+      if (snap.empty) {
+        alert("No images found for this user.");
+        setLoading(false);
+        return;
+      }
+
+      // 2. Delete all found documents
+      const deletePromises = snap.docs.map((d) => deleteDoc(doc(db, "gallery", d.id)));
+      
+      // Wait for all deletions to finish
+      await Promise.all(deletePromises);
+
+      // 3. Update UI: Remove all images belonging to this user from the current view
+      setImages((prev) => prev.filter((img) => img.creatorId !== targetUserId));
+
+      alert(`SUCCESS: Nuked ${snap.docs.length} images from the database.`);
+    } catch (error: any) {
+      console.error("Nuke Operation Failed:", error);
+      alert(`System Error: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // GalleryContent function ke return ke andar, sabse upar:
   const jsonLd = {
     "@context": "https://schema.org/",
@@ -717,34 +764,60 @@ function GalleryContent() {
         {isAdmin && (
           <div className="max-w-7xl mx-auto px-4 mb-10">
             <div className="bg-zinc-900 border-2 border-red-500/30 p-8 rounded-[2.5rem] shadow-2xl relative overflow-hidden">
+              {/* Decorative Background Icon */}
               <div className="absolute top-0 right-0 p-4">
                 <ShieldCheck className="text-red-500 opacity-20" size={80} />
               </div>
               
               <div className="flex justify-between items-center mb-8 relative z-10">
-                <div>
-                  <h2 className="text-xl font-black uppercase italic tracking-tighter text-red-500">System Administrator</h2>
-                  <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Master Database Control</p>
+                <div className="flex items-center gap-4">
+                  <div className="bg-red-500 p-2 rounded-xl shadow-[0_0_20px_rgba(239,68,68,0.4)]">
+                    <Lock size={20} className="text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-black uppercase italic tracking-tighter text-red-500 leading-none">System Administrator</h2>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                      </span>
+                      <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">Full Database Access Active</p>
+                    </div>
+                  </div>
                 </div>
-                <button onClick={() => setIsAdmin(false)} className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-xl text-[10px] font-black uppercase transition-all">Logout</button>
+                <button 
+                  onClick={() => setIsAdmin(false)} 
+                  className="px-6 py-2 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/20 rounded-xl text-[10px] font-black uppercase transition-all duration-300 active:scale-95"
+                >
+                  Logout Admin
+                </button>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 relative z-10">
-                <div className="bg-black/40 p-5 rounded-3xl border border-white/5">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 relative z-10">
+                {/* Total Assets */}
+                <div className="bg-black/40 p-5 rounded-3xl border border-white/5 backdrop-blur-md">
                   <p className="text-[10px] font-bold text-zinc-400 uppercase mb-1">Total Assets</p>
-                  <p className="text-3xl font-black">{dbStats.total}</p>
+                  <p className="text-3xl font-black text-white">{dbStats.total}</p>
                 </div>
-                <div className="bg-black/40 p-5 rounded-3xl border border-white/5">
-                  <p className="text-[10px] font-bold text-zinc-400 uppercase mb-1">Public/Private</p>
-                  <p className="text-3xl font-black text-indigo-500">{dbStats.public} <span className="text-zinc-700">/</span> {dbStats.private}</p>
+
+                {/* Public vs Private */}
+                <div className="bg-black/40 p-5 rounded-3xl border border-white/5 backdrop-blur-md">
+                  <p className="text-[10px] font-bold text-zinc-400 uppercase mb-1">Public / Private</p>
+                  <div className="flex items-baseline gap-1">
+                    <p className="text-3xl font-black text-indigo-500">{dbStats.public}</p>
+                    <span className="text-zinc-600 font-bold">/</span>
+                    <p className="text-xl font-black text-zinc-400">{dbStats.private}</p>
+                  </div>
                 </div>
-                <div className="bg-black/40 p-5 rounded-3xl border border-white/5">
-                  <p className="text-[10px] font-bold text-zinc-400 uppercase mb-1">Database Weight</p>
+
+                {/* Database Weight */}
+                <div className="bg-black/40 p-5 rounded-3xl border border-white/5 backdrop-blur-md">
+                  <p className="text-[10px] font-bold text-zinc-400 uppercase mb-1">DB Weight</p>
                   <p className="text-3xl font-black text-emerald-500">{dbStats.storageMB} <span className="text-sm">MB</span></p>
                 </div>
-                {/* NEW: RESET BUTTON (First Week Active Only) */}
+
+                {/* Monthly Reset Control */}
                 {(() => {
-                  // Logic: Check if today is between 1st and 7th of the month
                   const today = new Date().getDate();
                   const isFirstWeek = today >= 1 && today <= 7;
 
@@ -752,32 +825,30 @@ function GalleryContent() {
                     <button 
                       onClick={resetMonthlyLikes}
                       disabled={!isFirstWeek}
-                      className={`relative overflow-hidden transition-all duration-300 rounded-3xl font-black uppercase text-[10px] flex flex-col items-center justify-center gap-1 p-4 md:p-0
+                      className={`relative overflow-hidden transition-all duration-300 rounded-3xl font-black uppercase text-[10px] flex flex-col items-center justify-center gap-1 p-4
                         ${isFirstWeek 
-                          ? "bg-red-600/20 hover:bg-red-600 border border-red-500/50 text-red-500 hover:text-white cursor-pointer shadow-[0_0_20px_rgba(220,38,38,0.2)]" 
-                          : "bg-zinc-900/50 border border-white/5 text-zinc-600 cursor-not-allowed grayscale"
+                          ? "bg-red-600/10 hover:bg-red-600 border border-red-500/50 text-red-500 hover:text-white cursor-pointer shadow-[0_0_20px_rgba(220,38,38,0.1)]" 
+                          : "bg-zinc-900/50 border border-white/5 text-zinc-600 cursor-not-allowed opacity-50"
                         }`}
                     >
-                      <Flame size={18} className={isFirstWeek ? "animate-pulse" : "opacity-30"} />
-                      
-                      <span className="tracking-tighter">
-                        {isFirstWeek ? "Reset Season" : "Reset Locked"}
-                      </span>
-
-                      {/* Helper text for extra clarity */}
-                      {!isFirstWeek && (
-                        <span className="text-[7px] font-bold text-zinc-500 lowercase opacity-60">
-                          Opens on 1st-7th
-                        </span>
-                      )}
+                      <Flame size={18} className={isFirstWeek ? "animate-pulse" : ""} />
+                      <span className="tracking-tighter">{isFirstWeek ? "Reset Season" : "Reset Locked"}</span>
+                      {!isFirstWeek && <span className="text-[7px] font-bold opacity-60">Opens 1st-7th</span>}
                     </button>
                   );
                 })()}
-                <button onClick={fetchAdminStats} className="bg-white text-black rounded-3xl font-black uppercase text-[10px] hover:scale-95 transition-transform">
-                  Refresh Data
+
+                {/* Refresh Logic */}
+                <button 
+                  onClick={fetchAdminStats} 
+                  className="bg-white hover:bg-zinc-200 text-black rounded-3xl font-black uppercase text-[10px] flex flex-col items-center justify-center gap-1 transition-all active:scale-95"
+                >
+                  <Zap size={18} fill="currentColor" />
+                  <span>Refresh Data</span>
                 </button>
               </div>
             </div>
+            <AdminInbox isAdmin={isAdmin} />
           </div>
         )}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-8 md:mb-12">
@@ -965,20 +1036,11 @@ function GalleryContent() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mt-6">
             {images.map((img, idx) => {
-              // 1. UPDATED RANK LOGIC: Global & Monthly
               const isGlobalKing = globalLeaderboard?.[0]?.id === img.creatorId;
               const isGlobalElite = globalLeaderboard?.[1]?.id === img.creatorId || globalLeaderboard?.[2]?.id === img.creatorId;
-              
-              // Checking monthly winners (assuming you'll have a monthlyLeaderboard state)
               const isMonthlyWinner = monthlyLeaderboard?.[0]?.id === img.creatorId;
-
-              // 2. OWNERSHIP & PRIZE LOGIC (Updated to Global Rank)
               const isOwn = img.creatorId === userId;
               
-              // Prize: Global Top 3 or Monthly Winner get stand-out effects
-              const hasPremiumStatus = (isGlobalKing || isGlobalElite || isMonthlyWinner) && isOwn;
-
-              // 3. UPDATED FRAME STYLE: Golden Aura for King
               const frameStyle = isGlobalKing
                 ? "border-yellow-500 shadow-[0_0_50px_-12px_rgba(234,179,8,0.7)] ring-2 ring-yellow-500/30 scale-[1.01]" 
                 : isGlobalElite
@@ -991,129 +1053,137 @@ function GalleryContent() {
                 <div
                   key={img.id}
                   ref={idx === images.length - 1 ? lastImageElementRef : null}
-                  className={`group relative w-full aspect-[4/5] bg-zinc-900 rounded-[24px] md:rounded-[40px] overflow-hidden border transition-all duration-500 ${frameStyle}`}
+                  className={`group relative w-full aspect-[4/5] bg-zinc-900 rounded-[24px] md:rounded-[40px] overflow-hidden border transition-all duration-500 ${frameStyle} 
+                    ${isAdmin && img.isPrivate ? "opacity-80 ring-2 ring-red-500/20" : ""}`}
                 >
-                  {/* GOLDEN AURA OVERLAY: Only for the Global King */}
-                  {isGlobalKing && (
-                    <div className="absolute inset-0 bg-gradient-to-tr from-yellow-500/20 via-transparent to-yellow-500/10 animate-pulse pointer-events-none z-10" />
+                  {/* 1. ADMIN MASTER OVERLAY */}
+                  {isAdmin && (
+                    <div className="absolute top-4 left-4 right-4 z-[60] flex flex-col gap-2 pointer-events-none">
+                      <div className="flex justify-between items-start w-full">
+                        {/* Left: Status & Identity */}
+                        <div className="flex flex-col gap-1">
+                          <div className={`px-2 py-1 rounded-md text-[8px] font-black uppercase tracking-tighter backdrop-blur-md border ${
+                            img.isPrivate ? "bg-red-500/20 border-red-500/50 text-red-400" : "bg-emerald-500/20 border-emerald-500/50 text-emerald-400"
+                          }`}>
+                            {img.isPrivate ? "HIDDEN" : "VISIBLE"}
+                          </div>
+                          <div className="bg-black/80 px-2 py-1 rounded-md text-[7px] text-zinc-400 font-mono border border-white/5 backdrop-blur-md">
+                            CID: {img.creatorId.slice(0,8)}
+                          </div>
+                        </div>
+
+                        {/* Right: Master Actions */}
+                        <div className="flex gap-1 pointer-events-auto">
+                          {/* Force Privacy Toggle */}
+                          <button
+                            onClick={(e) => { e.preventDefault(); togglePrivacy(e, img.id, !!img.isPrivate); }}
+                            className="p-2 bg-white text-black hover:bg-indigo-500 hover:text-white rounded-lg transition-all shadow-xl active:scale-90"
+                          >
+                            {img.isPrivate ? <Globe size={12} strokeWidth={3} /> : <Lock size={12} strokeWidth={3} />}
+                          </button>
+
+                          {/* THE NUKE BUTTON: Delete all images by this user */}
+                          <button 
+                            onClick={(e) => { 
+                              e.preventDefault(); 
+                              if(confirm(`NUKE ALERT: Delete ALL images from user ${img.creatorName || img.creatorId}?`)) {
+                                nukeUserImages(img.creatorId); 
+                              }
+                            }}
+                            className="p-2 bg-orange-600 text-white rounded-lg shadow-xl hover:bg-orange-500 transition-all active:scale-90"
+                            title="Nuke User Assets"
+                          >
+                            <UserMinus size={12} strokeWidth={3} />
+                          </button>
+
+                          {/* Single Delete */}
+                          <button 
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); adminDelete(img.id, img.creatorId); }}
+                            className="p-2 bg-red-600 text-white rounded-lg shadow-xl hover:bg-red-500 transition-all active:scale-90"
+                          >
+                            <Trash2 size={12} strokeWidth={3} />
+                          </button>
+
+                          <button onClick={(e) => handleLike(e, img)} className={`p-2.5 rounded-xl backdrop-blur-xl border border-white/10 flex items-center gap-2 transition-all ${profile?.likedImages?.includes(img.id) ? 'bg-red-500 border-red-400 text-white' : 'bg-black/60 text-white'}`}>
+                        <Heart size={14} fill={profile?.likedImages?.includes(img.id) ? "white" : "none"} />
+                        <span className="text-[10px] font-black">{img.likesCount || 0}</span>
+                      </button>
+                        </div>
+                      </div>
+                    </div>
                   )}
 
-                  {/* --- LINK START --- */}
+                  {/* GOLDEN AURA & IMAGE LINK (Same as previous logic) */}
+                  {isGlobalKing && <div className="absolute inset-0 bg-gradient-to-tr from-yellow-500/20 via-transparent to-yellow-500/10 animate-pulse pointer-events-none z-10" />}
+
                   <Link href={`/gallery/${img.id}`} className="block w-full h-full cursor-zoom-in">
                     <img
                       src={img.imageUrl}
-                      alt={`${img.prompt} - AI Image by Imagynex`} 
-                      title={`${img.prompt} | Imagynex AI Studio`}
-                      className="w-full h-full object-cover transition-transform duration-[1s] group-hover:scale-110"
+                      alt={img.prompt}
+                      className={`w-full h-full object-cover transition-transform duration-[1s] group-hover:scale-110 ${isAdmin && img.isPrivate ? "grayscale-[0.4] brightness-75" : ""}`}
                       loading="lazy"
-                      crossOrigin="anonymous"
                     />
-
+                    {/* Prompt Overlay on Hover */}
                     <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-all duration-500 z-10 flex flex-col items-center justify-center p-8 backdrop-blur-[2px]">
-                      <p className="text-[11px] md:text-xs text-white/90 font-medium italic text-center line-clamp-4 mb-4 leading-relaxed">
-                        "{img.prompt}"
-                      </p>
-                      
-                      <button 
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          navigator.clipboard.writeText(img.prompt);
-                          alert("Prompt copied!");
-                        }}
-                        className="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/20 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all flex items-center gap-2"
-                      >
+                      <p className="text-[11px] md:text-xs text-white/90 font-medium italic text-center line-clamp-4 mb-4 leading-relaxed">"{img.prompt}"</p>
+                      <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); navigator.clipboard.writeText(img.prompt); alert("Copied!"); }} className="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/20 rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center gap-2">
                         <Edit3 size={12} /> Copy Prompt
                       </button>
                     </div>
                   </Link>
-                  {/* --- LINK END --- */}
 
-                  {/* TOP UI LAYER */}
-                  <div className="absolute top-4 inset-x-4 flex justify-between items-start z-30">
-                    <div className="flex flex-col gap-2">
-                      {/* 1. UPDATED BADGES: Using new Legend Titles */}
+                  {/* REGULAR UI LAYER */}
+                  <div className="absolute top-4 inset-x-4 flex justify-between items-start z-30 pointer-events-none">
+                    <div className="flex flex-col gap-2 pointer-events-auto">
                       {(isGlobalKing || isGlobalElite) && (
-                        <div className={`p-1.5 rounded-lg backdrop-blur-md border flex items-center gap-1.5 shadow-2xl ${
-                          isGlobalKing ? 'bg-yellow-500/20 border-yellow-500/40 text-yellow-500' :
-                          'bg-indigo-600/20 border-indigo-400/40 text-indigo-300'
-                        }`}>
+                        <div className={`p-1.5 rounded-lg backdrop-blur-md border flex items-center gap-1.5 ${isGlobalKing ? 'bg-yellow-500/20 border-yellow-500/40 text-yellow-500' : 'bg-indigo-600/20 border-indigo-400/40 text-indigo-300'}`}>
                           {isGlobalKing ? <Crown size={12} /> : <ShieldCheck size={12} />}
-                          <span className="text-[7px] font-black uppercase tracking-tighter">
-                            {isGlobalKing ? "Global Sovereign" : "Legendary Elite"}
-                          </span>
+                          <span className="text-[7px] font-black uppercase tracking-tighter">{isGlobalKing ? "Global Sovereign" : "Legendary Elite"}</span>
                         </div>
                       )}
-
-                      {/* Monthly Winner Badge */}
-                      {isMonthlyWinner && (
-                        <div className="bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 p-1.5 rounded-lg backdrop-blur-md flex items-center gap-1.5">
-                          <Sparkles size={12} />
-                          <span className="text-[7px] font-black uppercase tracking-tighter">Monthly Star</span>
-                        </div>
-                      )}
-
-                      {/* 2. PRIVACY TOGGLE */}
-                      {isOwn && (
-                        <button
-                          onClick={(e) => togglePrivacy(e, img.id, !!img.isPrivate)}
-                          className={`p-2 md:p-2.5 rounded-xl backdrop-blur-xl border flex items-center gap-2 transition-all shadow-xl active:scale-90 ${
-                            img.isPrivate
-                              ? 'bg-orange-500/20 border-orange-500/40 text-orange-500'
-                              : 'bg-black/60 border-white/10 text-white hover:bg-indigo-600'
+                      {isOwn && !isAdmin && (
+                        <button 
+                          onClick={(e) => togglePrivacy(e, img.id, !!img.isPrivate)} 
+                          className={`p-2 md:p-2.5 rounded-xl backdrop-blur-xl border flex items-center gap-2 transition-all shadow-xl active:scale-95 ${
+                            img.isPrivate 
+                              ? 'bg-orange-500/20 border-orange-500/40 text-orange-500' 
+                              : 'bg-black/60 border-white/10 text-white hover:bg-black/80'
                           }`}
                         >
-                          {img.isPrivate ? <Lock size={14} /> : <Globe size={14} className="text-green-400" />}
-                          <span className="text-[8px] font-black uppercase tracking-tighter hidden md:block">
+                          {/* Icon Logic */}
+                          {img.isPrivate ? (
+                            <Lock size={14} strokeWidth={3} />
+                          ) : (
+                            <Globe size={14} className="text-green-400" strokeWidth={3} />
+                          )}
+
+                          {/* Text Label: Visible to Owner */}
+                          <span className="text-[10px] font-black uppercase tracking-tighter">
                             {img.isPrivate ? 'Private' : 'Public'}
                           </span>
                         </button>
                       )}
                     </div>
-
-                    {/* 3. LIKE BUTTON & ADMIN */}
-                    <div className="flex flex-col gap-2 items-end">
-                        <button
-                          onClick={(e) => handleLike(e, img)}
-                          className={`p-2.5 rounded-xl backdrop-blur-xl border border-white/10 flex items-center gap-2 transition-all ${
-                            profile?.likedImages?.includes(img.id) ? 'bg-red-500 border-red-400 text-white' : 'bg-black/60 text-white'
-                          }`}
-                        >
-                          <Heart size={14} fill={profile?.likedImages?.includes(img.id) ? "white" : "none"} />
-                          <span className="text-[10px] font-black">{img.likesCount || 0}</span>
-                        </button>
-
-                        {isAdmin && (
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); adminDelete(img.id, img.creatorId); }}
-                            className="p-2.5 bg-red-600 hover:bg-red-500 text-white rounded-xl shadow-2xl transition-all active:scale-90 flex items-center gap-2 border border-red-400/50"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        )}
+                    <div className="flex flex-col gap-2 items-end pointer-events-auto">
+                      <button onClick={(e) => handleLike(e, img)} className={`p-2.5 rounded-xl backdrop-blur-xl border border-white/10 flex items-center gap-2 transition-all ${profile?.likedImages?.includes(img.id) ? 'bg-red-500 border-red-400 text-white' : 'bg-black/60 text-white'}`}>
+                        <Heart size={14} fill={profile?.likedImages?.includes(img.id) ? "white" : "none"} />
+                        <span className="text-[10px] font-black">{img.likesCount || 0}</span>
+                      </button>
                     </div>
                   </div>
 
-                  {/* Bottom Info Overlay */}
+                  {/* BOTTOM INFO */}
                   <div className="absolute inset-x-0 bottom-0 p-4 md:p-6 bg-gradient-to-t from-black via-black/95 to-transparent flex flex-col gap-3 translate-y-4 group-hover:translate-y-0 transition-all duration-300 z-20">
                     <div className="flex items-center gap-2 px-1">
-                      <div className={`w-4 h-4 rounded-full flex items-center justify-center ${isGlobalKing ? 'bg-yellow-500' : 'bg-indigo-500'}`}>
-                        <User size={8} className="text-white" />
-                      </div>
+                      <div className={`w-4 h-4 rounded-full flex items-center justify-center ${isGlobalKing ? 'bg-yellow-500' : 'bg-indigo-500'}`}><User size={8} className="text-white" /></div>
                       <p className={`text-[9px] font-black uppercase tracking-tight ${isGlobalKing ? 'text-yellow-500' : 'text-indigo-400'}`}>
-                        {img.creatorName || 'Anonymous Creator'}
+                        {img.creatorName || 'Anonymous'} 
+                        {isAdmin && <span className="ml-2 text-red-500/60 font-mono text-[7px] tracking-widest">{img.creatorId.slice(-6)}</span>}
                       </p>
                     </div>
-
                     <div className="flex gap-2">
-                      <DownloadButton 
-                        imageUrl={img.imageUrl} 
-                        watermarkText="Imagynex.AI" 
-                      />
-                      <button
-                        onClick={() => router.push(`/?prompt=${encodeURIComponent(img.prompt)}`)}
-                        className="bg-zinc-800/80 p-2.5 rounded-lg border border-white/10 hover:bg-indigo-600 transition-colors"
-                      >
+                      <DownloadButton imageUrl={img.imageUrl} watermarkText="Imagynex.AI" />
+                      <button onClick={() => router.push(`/?prompt=${encodeURIComponent(img.prompt)}`)} className="bg-zinc-800/80 p-2.5 rounded-lg border border-white/10 hover:bg-indigo-600 transition-colors">
                         <Zap size={14} className="fill-white" />
                       </button>
                     </div>
