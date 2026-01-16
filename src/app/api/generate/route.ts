@@ -11,15 +11,23 @@ export async function GET(request: NextRequest) {
     const width = searchParams.get('width') || '1024';
     const height = searchParams.get('height') || '1024';
     const seed = searchParams.get('seed') || Math.floor(Math.random() * 1000000).toString();
-    const model = searchParams.get('model') || 'flux'; // Default flux sasta aur acha hai
+    const model = searchParams.get('model') || 'flux';
+    
+    // 1. Get Upscale Status
+    const isUpscale = searchParams.get('upscale') === 'true';
 
     if (!prompt) return NextResponse.json({ error: 'No prompt' }, { status: 400 });
 
-    // Negative prompt handling
+    // 2. Enhance Prompt for HD
+    // Agar user ne HD click kiya hai, toh hum prompt mein quality tags auto-add kar sakte hain
+    const hdTags = isUpscale ? ", extremely detailed, 8k resolution, masterpiece, sharp focus" : "";
+    const finalPrompt = `${prompt}${hdTags}`;
+
     const negPart = negative ? `&negative_prompt=${encodeURIComponent(negative)}` : "";
     
-    // Final URL Construction
-    const pollinationsUrl = `https://gen.pollinations.ai/image/${encodeURIComponent(prompt)}?width=${width}&height=${height}&seed=${seed}&model=${model}&nologo=true&enhance=true&referrer=imagynex${negPart}`;
+    // 3. Pollinations URL Construction
+    // Agar upscale true hai, toh 'enhance=true' pakka bhejna chahiye
+    const pollinationsUrl = `https://gen.pollinations.ai/image/${encodeURIComponent(finalPrompt)}?width=${width}&height=${height}&seed=${seed}&model=${model}&nologo=true&enhance=true&referrer=imagynex${negPart}`;
     
     const response = await fetch(pollinationsUrl, {
       method: 'GET',
@@ -31,19 +39,17 @@ export async function GET(request: NextRequest) {
     });
 
     if (!response.ok) {
-      // Agar pollen khatam ho jayein ya key galat ho
       return NextResponse.json({ error: 'Engine error or invalid key' }, { status: response.status });
     }
 
     const imageBuffer = await response.arrayBuffer();
-    
-    // Response headers ko dynamic rakhna behtar hai
     const contentType = response.headers.get('content-type') || 'image/webp';
 
     return new NextResponse(imageBuffer, {
       headers: {
         'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=31536000, immutable', // User gallery ke liye caching achi hai
+        // Jab image upscale ho toh caching aur bhi important hai
+        'Cache-Control': 'public, max-age=31536000, immutable',
       },
     });
 

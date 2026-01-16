@@ -22,3 +22,40 @@
 .animate-in {
   animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
+
+@keyframes neural-scan {
+  0% { top: 0%; opacity: 0; }
+  50% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+.animate-neural-scan {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 4px;
+  background: linear-gradient(to right, transparent, #4f46e5, transparent);
+  box-shadow: 0 0 15px #4f46e5;
+  animation: neural-scan 2s linear infinite;
+  z-index: 40;
+}
+
+.selected-style-glow {
+  box-shadow: 0 0 15px 2px rgba(99, 102, 241, 0.3);
+  position: relative;
+}
+
+.selected-style-glow::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  background: linear-gradient(45deg, #6366f1, #a855f7, #6366f1);
+  border-radius: 18px; /* Match your card radius + 2px */
+  z-index: -1;
+  animation: border-rotate 3s linear infinite;
+}
+
+@keyframes border-rotate {
+  from { filter: hue-rotate(0deg); }
+  to { filter: hue-rotate(360deg); }
+}

@@ -3,21 +3,13 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { 
   Download, Sparkles, Loader2, Image as ImageIcon, 
-  Zap, Maximize, MessageSquareText, RefreshCw,
-  MousePointer2, LayoutGrid, Menu, X, Share2,Wand2, Hash,
+  Zap, Maximize, Lock, Unlock, RefreshCw,
+  MousePointer2, LayoutGrid, Menu, X, Wand2, Hash,
   History, Sliders, ShieldCheck, Info, AlertCircle, Ban, Copy, Check, Trash2, ChevronDown
 } from 'lucide-react';
 
 import { getAuth } from "firebase/auth";
 import { signInAnonymously } from "firebase/auth";
-
-import { 
-  updateDoc,
-  getDoc, 
-  setDoc, 
-  increment,
-  where, 
-} from "firebase/firestore";
 
 // --- FIREBASE IMPORTS ---
 import { db } from "@/lib/firebase";
@@ -29,7 +21,9 @@ import {
   orderBy, 
   onSnapshot, 
   limit,
-  deleteDoc,
+  getDoc, 
+  setDoc, 
+  increment,
   doc
 } from "firebase/firestore";
 
@@ -130,7 +124,7 @@ const getImageOffline = async (id: string): Promise<Blob | null> => {
       };
     } catch (err) {
       console.error("Transaction failed", err);
-      resolve(null); // Fallback agar store na mile
+      resolve(null);
     }
   });
 };
@@ -145,6 +139,15 @@ interface CommunityImage {
   [key: string]: any;
 }
 
+// Define the type for the engine keys
+type EngineKey = 'zimage' | 'flux' | 'turbo';
+
+const ENGINE_PREVIEWS: Record<EngineKey, { name: string; desc: string; color: string }> = {
+  zimage: { name: "Z-Image", desc: "Balanced & Versatile", color: "text-blue-400" },
+  flux: { name: "Flux Schnell", desc: "Hyper-Realistic & Cinematic", color: "text-purple-400" },
+  turbo: { name: "SDXL Turbo", desc: "Fast & Artistic Sketches", color: "text-amber-400" }
+};
+
 export default function AIStudio() {
   const [prompt, setPrompt] = useState("");
   const [seed, setSeed] = useState<number | string>(""); 
@@ -152,7 +155,7 @@ export default function AIStudio() {
   const [loading, setLoading] = useState(false);
   const [enhancing, setEnhancing] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [model, setModel] = useState("flux");
+  const [model, setModel] = useState<EngineKey>("flux");
   const [ratio, setRatio] = useState("1:1");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -160,7 +163,6 @@ export default function AIStudio() {
   const [selectedStyle, setSelectedStyle] = useState("Default");
   const [communityImages, setCommunityImages] = useState<any[]>([]);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
-  const [linkCopied, setLinkCopied] = useState(false);
   const [showToast, setShowToast] = useState(false);
   const [showReleaseModal, setShowReleaseModal] = useState(false);
   const [negativePrompt, setNegativePrompt] = useState("blurry, bad anatomy, low quality, distorted, extra fingers, ugly, low-resolution, out of frame");
@@ -269,12 +271,36 @@ export default function AIStudio() {
   }, [showReleaseModal]);
 
   const styles = [
-    { name: "Default", suffix: "" },
-    { name: "Cinematic", suffix: ", cinematic lighting, 8k, highly detailed, masterpiece" },
-    { name: "Anime", suffix: ", anime style, vibrant colors, studio ghibli aesthetic" },
-    { name: "Cyberpunk", suffix: ", neon lights, futuristic, synthwave palette, tech" },
-    { name: "3D Render", suffix: ", octane render, unreal engine 5, volumetric lighting" },
-    { name: "Oil Painting", suffix: ", textured canvas, heavy brushstrokes, classical art" }
+    { 
+      name: "Default", 
+      suffix: "", 
+      img: "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?w=400&q=80" 
+    },
+    { 
+      name: "Cinematic", 
+      suffix: ", cinematic lighting, 8k, highly detailed, dramatic shadows, anamorphic lens flare", 
+      img: "https://images.unsplash.com/photo-1485846234645-a62644f84728?w=400&q=80" 
+    },
+    { 
+      name: "Anime", 
+      suffix: ", anime style, vibrant colors, studio ghibli aesthetic, cel shaded, high quality digital art", 
+      img: "https://images.unsplash.com/photo-1541562232579-512a21360020?w=400&q=80" 
+    },
+    { 
+      name: "Cyberpunk", 
+      suffix: ", neon lights, futuristic city, synthwave palette, high tech, rainy night street, glowing accents", 
+      img: "https://images.unsplash.com/photo-1605810230434-7631ac76ec81?w=400&q=80" 
+    },
+    { 
+      name: "3D Render", 
+      suffix: ", octane render, unreal engine 5, volumetric lighting, ray tracing, ultra-realistic textures, 4k", 
+      img: "https://images.unsplash.com/photo-1614850523296-d8c1af93d400?w=400&q=80" 
+    },
+    { 
+      name: "Oil Painting", 
+      suffix: ", textured canvas, heavy brushstrokes, classical art style, masterpiece, rich pigments", 
+      img: "https://images.unsplash.com/photo-1579783902614-a3fb3927b6a5?w=400&q=80" 
+    }
   ];
 
   // --- IS CODE KO UPDATE KAREIN ---
@@ -316,10 +342,6 @@ export default function AIStudio() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
-
-  const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatInput, setChatInput] = useState("");
-
 
   const enhancePrompt = async () => {
     if (!prompt) return;
@@ -438,120 +460,6 @@ export default function AIStudio() {
       console.error("Download failed", err);
       setLoading(false);
     }
-  };
-
-  const shareProject = async () => {
-    if (!image) return;
-    setLoading(true);
-
-    try {
-      const canvas = document.createElement("canvas");
-      const ctx = canvas.getContext("2d");
-      const img = new Image();
-      
-      // Critical for cloud-hosted images to avoid CORS errors
-      img.crossOrigin = "anonymous"; 
-      img.src = image;
-
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = () => {
-          setLoading(false);
-          setToast({ message: "Neural Link broken. Image could not be processed.", type: 'error' });
-          reject();
-        };
-      });
-
-      if (!ctx) return;
-
-      // Set canvas dimensions to match image
-      canvas.width = img.width;
-      canvas.height = img.height;
-
-      // Draw original image
-      ctx.drawImage(img, 0, 0);
-
-      // --- High-End Watermark Logic ---
-      const fontSize = Math.floor(canvas.width * 0.025); // Dynamic sizing
-      ctx.textAlign = "right";
-      
-      // 1. Shadow for contrast against any background
-      ctx.shadowColor = "black";
-      ctx.shadowBlur = 15;
-      ctx.shadowOffsetX = 0;
-      ctx.shadowOffsetY = 0;
-      
-      // 2. Styling the text
-      ctx.font = `900 ${fontSize}px Inter, sans-serif`; // Use a bold font
-      ctx.fillStyle = "rgba(255, 255, 255, 0.85)"; // Slight transparency
-      
-      // 3. The Watermark Text
-      const padding = canvas.width * 0.03;
-      ctx.fillText("IMAGYNEX NEURAL CORE", canvas.width - padding, canvas.height - padding);
-      
-      // 4. Reset shadow so it doesn't affect other draws (important!)
-      ctx.shadowBlur = 0;
-
-      // Convert to blob and share
-      canvas.toBlob(async (blob) => {
-        if (!blob) {
-          setLoading(false);
-          return;
-        }
-
-        const file = new File([blob], "Imagynex-Masterpiece.png", { type: "image/png" });
-        const shareData = {
-          title: 'Imagynex Synthesis',
-          text: `Behold this creation: "${prompt}"`,
-          files: [file],
-        };
-
-        try {
-          if (navigator.canShare && navigator.canShare(shareData)) {
-            await navigator.share(shareData);
-            setToast({ message: "Masterpiece transmitted!", type: 'success' });
-          } else {
-            // Fallback if sharing is not supported on the device
-            copyImageLinkFallback();
-          }
-        } catch (error) {
-          // 1. "AbortError" happens when the user simply closes the share menu (normal behavior)
-          if (error instanceof Error && error.name === 'AbortError') {
-            console.log("Neural Link: User closed share menu.");
-          } else {
-            // 2. Real errors (permissions, file issues, etc.)
-            console.error("Neural Link Error:", error);
-            setToast({ message: "Transmission Interrupted", type: 'error' });
-          }
-        } finally {
-          setLoading(false); // Ensure loading stops regardless of result
-        }
-      }, "image/png", 0.9);
-
-    } catch (error) {
-      console.error("Neural Error during sharing:", error);
-      setLoading(false);
-    }
-  };
-
-  // Fallback function agar share support na ho
-  const copyImageLinkFallback = () => {
-    if (!image) return;
-
-    // 1. Copy Link
-    navigator.clipboard.writeText(image);
-    
-    // 2. Trigger your 10/10 Toast instead of Alert
-    setShowToast(true);
-    setTimeout(() => setShowToast(false), 4000);
-
-    // 3. Silent Auto-Download
-    const link = document.createElement("a");
-    link.href = image;
-    link.download = `Imagynex-${Date.now()}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
   };
 
   useEffect(() => {
@@ -681,20 +589,20 @@ export default function AIStudio() {
     setLoading(true);
     setSaveStatus(null);
     setError(null);
+    setImages([]); 
 
     const auth = getAuth();
     if (!auth.currentUser) {
-        await signInAnonymously(auth);
+      await signInAnonymously(auth);
     }
 
-    // 1. UID Handling
+    // 1. UID & Profile Handling
     let storedUid = localStorage.getItem('imagynex_uid');
     if (!storedUid) {
       storedUid = 'u_' + Math.random().toString(36).substr(2, 9);
       localStorage.setItem('imagynex_uid', storedUid);
     }
 
-    // 2. User Profile Fetch
     let currentDisplayName = "Artist";
     try {
       const userDoc = await getDoc(doc(db, "users", storedUid));
@@ -705,108 +613,113 @@ export default function AIStudio() {
       console.error("User fetch error:", err);
     }
 
-    // 3. Seed & Aspect Ratio Logic
-    const finalSeed = overrideSeed !== undefined
-      ? overrideSeed
-      : (seed !== "" ? Number(seed) : Math.floor(Math.random() * 1000000));
+    // 2. Dimensions & Style
+    let baseW = 1024, baseH = 1024;
+    if (ratio === "16:9") { baseW = 1280; baseH = 720; }
+    if (ratio === "9:16") { baseW = 720; baseH = 1280; }
 
-    if (overrideSeed !== undefined || seed === "") {
-      setSeed(finalSeed);
-    }
-
-    let w = 1024, h = 1024;
-    if (ratio === "16:9") { w = 1280; h = 720; }
-    if (ratio === "9:16") { w = 720; h = 1280; }
-
+    const w = upscale ? Math.round(baseW * 1.5) : baseW;
+    const h = upscale ? Math.round(baseH * 1.5) : baseH;
     const styleSuffix = styles.find(s => s.name === selectedStyle)?.suffix || "";
     const fullPrompt = `${prompt}${styleSuffix}`;
 
-    // Global Feed enable karne ke liye 'feed=true' add kiya
-    const proxyUrl = `/api/generate?prompt=${encodeURIComponent(fullPrompt)}&negative_prompt=${encodeURIComponent(negativePrompt || "")}&width=${w}&height=${h}&model=${model}&seed=${finalSeed}&nologo=true&enhance=true&feed=true&t=${Date.now()}`;
-
     try {
-      const response = await fetch(proxyUrl);
-      if (!response.ok) throw new Error("Server Error");
+      // 3. BATCH EXECUTION (Generation)
+      const batchArray = Array.from({ length: batchCount });
+      const results = await Promise.all(batchArray.map(async (_, index) => {
+        const individualSeed = (index === 0 && overrideSeed !== undefined) 
+          ? overrideSeed 
+          : Math.floor(Math.random() * 1000000);
 
-      const blob = await response.blob();
+        const proxyUrl = `/api/generate?prompt=${encodeURIComponent(fullPrompt)}&negative_prompt=${encodeURIComponent(negativePrompt || "")}&width=${w}&height=${h}&model=${model}&seed=${individualSeed}&nologo=true&enhance=true&feed=true&upscale=${upscale}&t=${Date.now()}_${index}`;
 
-      // Add this to see what is actually inside the "small" file
-      if (blob.size < 50000) {
-        const text = await blob.text(); 
-        console.error("Actual response content:", text);
-        throw new Error("Authentication failed or engine error.");
-      }
+        const response = await fetch(proxyUrl);
+        if (!response.ok) throw new Error("Engine Error");
 
-      const objectURL = URL.createObjectURL(blob);
-      setImage(objectURL);
+        const blob = await response.blob();
+        if (blob.size < 50000) throw new Error("Image generation failed.");
+
+        return {
+          url: URL.createObjectURL(blob),
+          blob: blob,
+          seed: individualSeed,
+          proxyUrl: proxyUrl
+        };
+      }));
+
+      setImages(results.map(r => r.url)); 
+      setSeed(results[0].seed);
       setLoading(false);
 
-      const entryId = `img_${Date.now()}`;
+      // 4. --- SAVE ALL TO FIREBASE & LOCAL HISTORY ---
+      const newHistoryEntries: any[] = [];
 
-      // --- INITIAL ENTRY OBJECT ---
-      // 'let' use kiya hai taaki properties baad mein update ho sakein
-      let newEntry: any = {
-        id: entryId, 
-        url: objectURL, // Active session ke liye blob URL
-        prompt: fullPrompt,
-        seed: finalSeed,
-        ratio,
-        model: model,
-        timestamp: Date.now(),
-        firestoreId: null, // Default null
-        isPrivate: !isPublic 
-      };
-
-      // 4. --- FIREBASE & OFFLINE SAVE ---
-      try {
-        const docRef = await addDoc(collection(db, "gallery"), {
-          imageUrl: proxyUrl, 
+      await Promise.all(results.map(async (res, index) => {
+        const entryId = `img_${Date.now()}_${index}`;
+        
+        let entry: any = {
+          id: entryId, 
+          url: res.url,
           prompt: fullPrompt,
-          style: selectedStyle,
-          seed: finalSeed,
-          ratio: ratio,
+          seed: res.seed,
+          ratio,
           model: model,
-          createdAt: serverTimestamp(),
-          creatorId: storedUid,
-          creatorName: currentDisplayName,
-          likesCount: 0,
-          likedBy: [],
+          timestamp: Date.now(),
+          firestoreId: null,
           isPrivate: !isPublic 
-        });
+        };
 
-        // SAFE PROPERTY ASSIGNMENT: Checking if docRef exists
-        if (docRef && docRef.id) {
-            newEntry.firestoreId = docRef.id;
+        try {
+          // Save to Firestore
+          const docRef = await addDoc(collection(db, "gallery"), {
+            imageUrl: res.proxyUrl, 
+            prompt: fullPrompt,
+            style: selectedStyle,
+            seed: res.seed,
+            ratio: ratio,
+            model: model,
+            createdAt: serverTimestamp(),
+            creatorId: storedUid,
+            creatorName: currentDisplayName,
+            likesCount: 0,
+            likedBy: [],
+            isPrivate: !isPublic 
+          });
+
+          if (docRef?.id) entry.firestoreId = docRef.id;
+
+          // Save to IndexedDB (Offline)
+          try {
+            await saveImageOffline(entryId, res.blob);
+          } catch (offlineErr) {
+            console.error("Offline save failed for index", index, offlineErr);
+          }
+
+        } catch (dbErr) {
+          console.error("Firestore save failed for index", index, dbErr);
+          entry.firestoreId = "not_saved";
         }
 
+        newHistoryEntries.push(entry);
+      }));
+
+      // 5. UPDATE USER STATS (Increment by batchCount)
+      try {
         const userRef = doc(db, "users", storedUid);
         await setDoc(userRef, {
-          totalCreations: increment(1),
+          totalCreations: increment(batchCount),
           displayName: currentDisplayName,
           lastActive: serverTimestamp(),
         }, { merge: true });
-
         setSaveStatus(isPublic ? 'cloud' : 'private');
-
-        // OFFLINE BACKUP (IndexedDB)
-        try {
-          await saveImageOffline(entryId, blob);
-        } catch (e) {
-          console.error("Offline backup failed:", e);
-        }
-
-      } catch (e) {
-        console.error("Firebase Database Save Error:", e);
-        newEntry.firestoreId = "not_saved"; // Property exist karegi error mode mein bhi
-        setSaveStatus('local');
+      } catch (userErr) {
+        console.error("User stats update failed", userErr);
       }
 
-      // --- 5. FINAL HISTORY SYNC ---
-      // UI state mein blob URL rakhenge taaki image dikhti rahe
-      const currentFullHistory = [newEntry, ...history].slice(0, 15);
+      // 6. FINAL HISTORY SYNC (Add all new items to the top)
+      const currentFullHistory = [...newHistoryEntries, ...history].slice(0, 20);
       setHistory(currentFullHistory);
 
-      // LocalStorage ke liye 'url' ko null karenge taaki refresh par crash na ho
       const historyToStore = currentFullHistory.map(item => ({
         ...item,
         url: (item.url && item.url.startsWith('blob:')) ? null : item.url 
@@ -817,7 +730,7 @@ export default function AIStudio() {
     } catch (err: any) {
       setLoading(false);
       setError({
-        message: err.message || "Engine overloaded. Please try again.",
+        message: err.message || "Neural engine timeout.",
         type: "server_busy"
       });
     }
@@ -844,6 +757,24 @@ export default function AIStudio() {
     return () => { if (interval) clearInterval(interval); };
   }, [loading, model]); // Model add karne se message badal jayenge
 
+  const [isSeedLocked, setIsSeedLocked] = useState(false);
+
+  const [upscale, setUpscale] = useState(false);
+
+  // Logic to calculate prompt strength
+  const getPromptStrength = () => {
+    if (!prompt) return { label: "Empty", color: "text-zinc-600", width: "w-0" };
+    const length = prompt.length;
+    if (length < 20) return { label: "Weak", color: "text-red-400", width: "w-1/3" };
+    if (length < 60) return { label: "Good", color: "text-amber-400", width: "w-2/3" };
+    return { label: "Visionary", color: "text-indigo-400", width: "w-full" };
+  };
+
+  const strength = getPromptStrength();
+
+  // This tells TypeScript: "This is an array of strings"
+  const [images, setImages] = useState<string[]>([]); 
+  const [batchCount, setBatchCount] = useState<number>(1);
 
   return (
     <div className="min-h-screen bg-[#020202] text-zinc-100 font-sans selection:bg-indigo-600/50">
@@ -924,19 +855,48 @@ export default function AIStudio() {
         <div className="flex flex-col gap-6 max-w-5xl mx-auto">
           <div className="bg-zinc-900/40 border border-white/10 p-5 md:p-8 rounded-[24px] md:rounded-[48px] backdrop-blur-3xl shadow-2xl space-y-6">
             <div className="space-y-3">
-              <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-1">Art Style</label>
-              <div className="flex gap-2 overflow-x-auto pb-3 no-scrollbar scroll-smooth snap-x">
+              <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-1">
+                Art Style
+              </label>
+              
+              <div className="flex gap-4 overflow-x-auto pb-4 no-scrollbar scroll-smooth snap-x">
                 {styles.map((s) => (
                   <button 
                     key={s.name} 
                     onClick={() => setSelectedStyle(s.name)} 
-                    className={`whitespace-nowrap px-6 py-3 rounded-full text-[11px] font-black uppercase tracking-[0.15em] transition-all duration-300 border snap-center active:scale-90 ${
+                    className={`relative flex-shrink-0 w-28 h-28 rounded-2xl overflow-hidden transition-all duration-500 snap-center group border-2 ${
                       selectedStyle === s.name 
-                      ? 'bg-indigo-600 border-indigo-400 text-white shadow-[0_0_25px_rgba(79,70,229,0.5)] scale-105 z-10' 
-                      : 'bg-white/5 border-white/10 text-zinc-400 hover:border-white/30 hover:text-white hover:bg-white/10 hover:-translate-y-0.5'
+                      ? 'border-indigo-500 scale-105 shadow-[0_0_20px_rgba(79,70,229,0.4)]' 
+                      : 'border-white/5 hover:border-white/20'
                     }`}
                   >
-                    {s.name}
+                    {/* Background Preview Image */}
+                    <img 
+                      src={s.img} 
+                      alt={s.name}
+                      className={`absolute inset-0 w-full h-full object-cover transition-transform duration-700 ${
+                        selectedStyle === s.name ? 'scale-110' : 'group-hover:scale-110'
+                      }`}
+                    />
+
+                    {/* Gradient Overlay for Text Readability */}
+                    <div className={`absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent transition-opacity ${
+                      selectedStyle === s.name ? 'opacity-100' : 'opacity-60 group-hover:opacity-80'
+                    }`} />
+
+                    {/* Style Name */}
+                    <span className={`absolute bottom-3 left-0 right-0 text-[10px] font-black uppercase tracking-widest text-center transition-colors ${
+                      selectedStyle === s.name ? 'text-white' : 'text-zinc-300'
+                    }`}>
+                      {s.name}
+                    </span>
+
+                    {/* Selection Checkmark (Optional visual) */}
+                    {selectedStyle === s.name && (
+                      <div className="absolute top-2 right-2 bg-indigo-500 rounded-full p-1 animate-in zoom-in">
+                        <Check size={10} className="text-white" />
+                      </div>
+                    )}
                   </button>
                 ))}
               </div>
@@ -947,26 +907,15 @@ export default function AIStudio() {
                 <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Input Prompt</label>
                 
                 <div className="flex gap-3 md:gap-4">
-                  {/* 1. Magic Button */}
-                  <button onClick={applyMagicPrompt} className="flex items-center gap-1.5 text-[9px] md:text-[10px] font-black text-zinc-400 uppercase tracking-widest hover:text-white transition">
-                    <Sparkles size={12} fill="currentColor" /> 
-                    <span className="hidden xs:inline">Magic</span>
-                  </button>
-
                   <button 
                     onClick={enhancePrompt} 
                     disabled={enhancing || !prompt}
                     className="flex items-center gap-1.5 text-[9px] md:text-[10px] font-black text-indigo-400 uppercase hover:text-indigo-300 transition disabled:opacity-30"
                   >
-                    {enhancing ? (
-                      <Loader2 size={12} className="animate-spin" /> 
-                    ) : (
-                      <Wand2 size={12} />
-                    )}
+                    {enhancing ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
                     <span className="hidden xs:inline">{enhancing ? "Refining..." : "Enhance"}</span>
                   </button>
 
-                  {/* 3. Copy Button */}
                   <button onClick={handleCopy} disabled={!prompt} className="flex items-center gap-1.5 text-[9px] md:text-[10px] font-black text-zinc-400 uppercase tracking-widest hover:text-white disabled:opacity-20 transition">
                     {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
                     <span className="hidden xs:inline">{copied ? "Copied" : "Copy"}</span>
@@ -974,12 +923,31 @@ export default function AIStudio() {
                 </div>
               </div>
 
-              <textarea 
-                className="w-full bg-black/80 border border-white/10 rounded-2xl p-5 text-sm md:text-lg outline-none transition-all h-32 md:h-28 resize-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 focus:shadow-[0_0_30px_rgba(79,70,229,0.15)] placeholder:text-zinc-700" 
-                value={prompt} 
-                onChange={(e) => setPrompt(e.target.value)} 
-                placeholder="Describe your wildest imagination..." 
-              />
+              {/* --- START OF UPDATE: Relative wrapper for Strength Meter --- */}
+              <div className="relative group/prompt">
+                <textarea 
+                  className="w-full bg-black/80 border border-white/10 rounded-2xl p-5 pr-16 text-sm md:text-lg outline-none transition-all h-32 md:h-28 resize-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 focus:shadow-[0_0_30px_rgba(79,70,229,0.15)] placeholder:text-zinc-700" 
+                  value={prompt} 
+                  onChange={(e) => setPrompt(e.target.value)} 
+                  placeholder="Describe your wildest imagination..." 
+                />
+                
+                {/* Strength Meter UI */}
+                <div className="absolute bottom-4 right-4 flex flex-col items-end gap-1.5 pointer-events-none">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[8px] font-black uppercase tracking-[0.2em] transition-colors duration-500 ${strength.color}`}>
+                      {strength.label}
+                    </span>
+                  </div>
+                  <div className="w-16 h-[3px] bg-white/5 rounded-full overflow-hidden border border-white/5">
+                    <div 
+                      className={`h-full transition-all duration-700 ease-out ${strength.color.replace('text', 'bg')} ${strength.width}`}
+                      style={{ boxShadow: `0 0 10px currentColor` }}
+                    />
+                  </div>
+                </div>
+              </div>
+              {/* --- END OF UPDATE --- */}
             </div>
             <div className="space-y-4">
               <button 
@@ -1001,19 +969,37 @@ export default function AIStudio() {
                       {negativePrompt && (
                         <button 
                           onClick={() => setNegativePrompt("")}
-                          className="text-[8px] text-zinc-700 hover:text-red-400 transition-colors uppercase tracking-widest"
+                          className="text-[8px] text-red-400/50 hover:text-red-400 transition-colors uppercase tracking-widest"
                         >
-                          Clear Filters
+                          Clear All
                         </button>
                       )}
                     </label>
+                    
                     <input 
                       type="text" 
                       value={negativePrompt} 
                       onChange={(e) => setNegativePrompt(e.target.value)} 
-                      className="w-full bg-black/40 border border-white/5 rounded-xl p-3 text-sm outline-none focus:border-indigo-500/50 transition-all placeholder:text-zinc-800 text-zinc-300" 
+                      className="w-full bg-black/40 border border-white/5 rounded-xl p-3 text-sm outline-none focus:border-red-500/30 transition-all placeholder:text-zinc-800 text-zinc-300" 
                       placeholder="Avoid: blurry, distorted, text..." 
                     />
+
+                    {/* Quick Action Negative Tags */}
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {["blurry", "low quality", "text", "distorted"].map((tag) => (
+                        <button
+                          key={tag}
+                          onClick={() => {
+                            if (!negativePrompt.includes(tag)) {
+                              setNegativePrompt(prev => prev ? `${prev}, ${tag}` : tag);
+                            }
+                          }}
+                          className="px-2 py-1 rounded-md bg-white/5 border border-white/5 text-[8px] font-bold text-zinc-500 hover:text-white hover:bg-white/10 transition-all uppercase"
+                        >
+                          + {tag}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   {/* 2. Advanced Controls: Seed & Privacy */}
@@ -1021,39 +1007,75 @@ export default function AIStudio() {
                     {/* Seed Control */}
                     <div className="space-y-2">
                       <label className="text-[10px] font-black text-zinc-400 uppercase flex items-center justify-between px-1 tracking-widest">
-                        <span className="flex items-center gap-1.5"><Hash size={12} className="text-indigo-500" /> Seed Engine</span>
-                        {seed && seed !== -1 && (
+                        <div className="flex items-center gap-1.5">
+                          <Hash size={12} className="text-indigo-500" /> 
+                          <span>Seed Engine</span>
+                        </div>
+                        
+                        <div className="flex items-center gap-3">
+                          {/* 1. Copy Seed Button (Only shows if seed exists) */}
+                          {seed && seed !== -1 && (
+                            <button 
+                              onClick={() => {
+                                navigator.clipboard.writeText(seed.toString());
+                                setToast({ message: "Seed copied to clipboard", type: 'success' });
+                              }}
+                              className="text-[9px] text-zinc-500 hover:text-indigo-400 transition-colors flex items-center gap-1 group uppercase"
+                            >
+                              <Copy size={10} className="opacity-50 group-hover:opacity-100" />
+                              Copy
+                            </button>
+                          )}
+
+                          {/* 2. Lock Toggle (New Feature) */}
                           <button 
-                            onClick={() => {
-                              navigator.clipboard.writeText(seed.toString());
-                              setToast({ message: "Seed copied to clipboard", type: 'success' });
-                            }}
-                            className="text-[9px] text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1 group"
+                            onClick={() => setIsSeedLocked(!isSeedLocked)}
+                            className={`text-[9px] px-2 py-0.5 rounded-md border transition-all flex items-center gap-1 font-black ${
+                              isSeedLocked 
+                              ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' 
+                              : 'text-zinc-600 border-zinc-800 hover:border-zinc-700'
+                            }`}
                           >
-                            <Copy size={10} className="opacity-50 group-hover:opacity-100" />
-                            COPY SEED
+                            {isSeedLocked ? <Lock size={10} /> : <Unlock size={10} />}
+                            {isSeedLocked ? 'LOCKED' : 'FIX SEED'}
                           </button>
-                        )}
+                        </div>
                       </label>
                       
                       <div className="relative group">
                         <input 
                           type="number" 
+                          disabled={isSeedLocked}
                           value={seed} 
                           onChange={(e) => setSeed(e.target.value)} 
-                          className="w-full bg-black/40 border border-white/5 rounded-xl p-3 text-sm font-mono outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 transition-all placeholder:text-zinc-700" 
+                          className={`w-full bg-black/40 border border-white/5 rounded-xl p-3 text-sm font-mono outline-none transition-all placeholder:text-zinc-800 ${
+                            isSeedLocked 
+                            ? 'opacity-40 cursor-not-allowed border-transparent' 
+                            : 'focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20'
+                          }`} 
                           placeholder="Random (-1)" 
                         />
-                        <button 
-                          onClick={() => {
-                            const newSeed = Math.floor(Math.random() * 999999999);
-                            setSeed(newSeed);
-                          }}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-lg bg-white/5 text-zinc-400 hover:text-indigo-400 hover:bg-white/10 transition-all"
-                          title="Generate Random Seed"
-                        >
-                          <RefreshCw size={14} />
-                        </button>
+                        
+                        {/* 3. Randomize Button (Hidden if locked) */}
+                        {!isSeedLocked && (
+                          <button 
+                            onClick={() => {
+                              const newSeed = Math.floor(Math.random() * 999999999);
+                              setSeed(newSeed);
+                            }}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-lg bg-white/5 text-zinc-400 hover:text-indigo-400 hover:bg-white/10 transition-all"
+                            title="Generate Random Seed"
+                          >
+                            <RefreshCw size={14} />
+                          </button>
+                        )}
+
+                        {/* Locked Overlay Indicator */}
+                        {isSeedLocked && (
+                          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-indigo-500/30">
+                            <Lock size={14} />
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -1107,48 +1129,97 @@ export default function AIStudio() {
                 
                 {/* --- Neural Engine Section --- */}
                 <div className="space-y-2">
-                  <label htmlFor="engine-select" className="text-[10px] font-black text-zinc-500 uppercase tracking-widest px-1 flex items-center">
-                    Neural Engine <ProBadge />
-                  </label>
+                  <div className="flex items-center justify-between px-1">
+                    <label htmlFor="engine-select" className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center">
+                      Neural Engine <ProBadge />
+                    </label>
+                    
+                    {/* NEW HD TOGGLE */}
+                    <button 
+                      onClick={() => setUpscale(!upscale)}
+                      className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md border transition-all duration-300 ${
+                        upscale 
+                        ? 'bg-indigo-500/10 border-indigo-500/50 text-indigo-400 shadow-[0_0_10px_rgba(79,70,229,0.2)]' 
+                        : 'bg-transparent border-zinc-800 text-zinc-600 hover:border-zinc-700'
+                      }`}
+                    >
+                      <div className={`w-1 h-1 rounded-full ${upscale ? 'bg-indigo-400 animate-pulse' : 'bg-zinc-600'}`} />
+                      <span className="text-[8px] font-black tracking-tighter">HD UPSCALE</span>
+                    </button>
+                  </div>
                   <div className="relative group">
                     <select 
                       id="engine-select" 
                       value={model} 
-                      onChange={(e) => setModel(e.target.value)} 
+                      onChange={(e) => setModel(e.target.value as EngineKey)}
                       className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none focus:border-indigo-500/50 text-white appearance-none cursor-pointer transition-all hover:bg-black/60"
                     >
-                      <option value="zimage">Z-IMAGE (Standard - Fast)</option>
-                      <option value="flux">FLUX SCHNELL (Cinematic - High Speed)</option>
-                      <option value="turbo">SDXL TURBO (Creative - Fast)</option>
-                      {/* Top users ke liye ya pro users ke liye aap konditional render kar sakte hain */}
-                      {/* <option value="seedream-pro">SEEDREAM PRO (Ultra Realistic)</option> */}
+                      <option value="zimage">Z-IMAGE (Standard)</option>
+                      <option value="flux">FLUX SCHNELL (Pro)</option>
+                      <option value="turbo">SDXL TURBO (Fast)</option>
                     </select>
-                    <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-500">
+                    
+                    {/* Dynamic Status Label below dropdown */}
+                    <div className="mt-2 px-1 flex items-center gap-1.5">
+                      <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${model === 'flux' ? 'bg-purple-500' : 'bg-indigo-500'}`} />
+                      <span className="text-zinc-300">
+                        {/* The "as EngineKey" tells TypeScript: "Don't worry, I know this string is a valid key" */}
+                        {ENGINE_PREVIEWS[model as EngineKey]?.desc || "Initializing Engine..."}
+                      </span>
+                    </div>
+                    
+                    <div className="absolute right-4 top-4 pointer-events-none text-zinc-500">
                       <ChevronDown size={14} />
                     </div>
                   </div>
                 </div>
 
-                {/* 4. Canvas Ratio */}
+                {/* 4. Canvas Ratio with Visual Previews */}
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest px-1">Aspect Ratio</label>
-                  <div className="flex gap-2">
-                    {["1:1", "16:9", "9:16"].map(r => (
+                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest px-1">
+                    Aspect Ratio
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { label: "1:1", w: "w-4", h: "h-4", desc: "Square" },
+                      { label: "16:9", w: "w-6", h: "h-3.5", desc: "Cinematic" },
+                      { label: "9:16", w: "w-3.5", h: "h-6", desc: "Mobile" }
+                    ].map((r) => (
                       <button 
-                        key={r} 
-                        onClick={() => setRatio(r)} 
-                        className={`flex-1 p-3 rounded-xl text-[10px] font-black border transition-all duration-300 ${
-                          ratio === r 
+                        key={r.label} 
+                        onClick={() => setRatio(r.label)} 
+                        className={`flex flex-col items-center justify-center gap-2 p-3 rounded-xl border transition-all duration-300 ${
+                          ratio === r.label 
                           ? 'bg-white text-black border-white shadow-[0_10px_20px_rgba(255,255,255,0.1)]' 
                           : 'bg-black/60 border-white/5 text-zinc-400 hover:border-white/20 hover:text-white'
                         }`}
                       >
-                        {r}
+                        {/* Visual Box Preview */}
+                        <div className={`${r.w} ${r.h} border-2 ${ratio === r.label ? 'border-black' : 'border-zinc-600'} rounded-sm mb-1`} />
+                        <span className="text-[10px] font-black">{r.label}</span>
                       </button>
                     ))}
                   </div>
                 </div>
 
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Batch Size</label>
+                  <div className="flex gap-2">
+                    {[1, 2, 4].map((num) => (
+                      <button
+                        key={num}
+                        onClick={() => setBatchCount(num)}
+                        className={`flex-1 py-2 rounded-lg border text-[10px] font-bold transition-all ${
+                          batchCount === num 
+                          ? 'bg-indigo-500/20 border-indigo-500 text-indigo-400' 
+                          : 'bg-transparent border-zinc-800 text-zinc-600 hover:border-zinc-700'
+                        }`}
+                      >
+                        {num}X
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               <button 
@@ -1188,45 +1259,70 @@ export default function AIStudio() {
             </div>
 
             {/* Main Canvas / Image Display */}
-            <div id="canvas" className="relative rounded-[24px] md:rounded-[48px] overflow-hidden border border-white/5 bg-zinc-900/30 aspect-square md:aspect-video flex items-center justify-center group shadow-2xl transition-all">
+            <div id="canvas" className="relative rounded-[24px] md:rounded-[48px] overflow-hidden border border-white/5 bg-zinc-900/30 min-h-[400px] flex items-center justify-center group shadow-2xl transition-all p-4 md:p-8">
               
-              {/* Image State */}
-              {image ? (
-                <div className="w-full h-full relative">
-                  <img 
-                    src={image} 
-                    loading="eager"
-                    onError={(e) => {
-                      e.currentTarget.src = "https://placehold.co/1024x1024/09090b/4f46e5?text=Signal+Lost";
-                    }}
-                    className={`w-full h-full object-contain transition-all duration-700 ${
-                      loading ? 'blur-2xl scale-95 opacity-50' : 'blur-0 scale-100 opacity-100'
-                    }`} 
-                    alt="Neural Result" 
-                  />
-                  
-                  {/* Buttons: Image banne ke baad hi dikhenge */}
+              {/* Images Grid State */}
+              {images.length > 0 ? (
+                <div className="w-full h-full flex flex-col gap-6">
+                  {/* Dynamic Grid: 1 image = full, 2 = side-by-side, 4 = 2x2 */}
+                  <div className={`grid gap-4 w-full h-full ${
+                    images.length === 1 ? 'grid-cols-1 max-w-2xl mx-auto' : 
+                    images.length === 2 ? 'grid-cols-1 md:grid-cols-2' : 
+                    'grid-cols-2 lg:grid-cols-2'
+                  }`}>
+                    {images.map((imgUrl, index) => (
+                      <div key={index} className="relative group/card rounded-2xl overflow-hidden bg-black/40 border border-white/5 aspect-square shadow-xl transition-all hover:border-indigo-500/30">
+                        <img 
+                          src={imgUrl} 
+                          loading="eager"
+                          onError={(e) => {
+                            e.currentTarget.src = "https://placehold.co/1024x1024/09090b/4f46e5?text=Signal+Lost";
+                          }}
+                          className={`w-full h-full object-cover transition-all duration-700 ${
+                            loading ? 'blur-2xl scale-95 opacity-50' : 'blur-0 scale-100 opacity-100'
+                          }`} 
+                          alt={`Neural Result ${index + 1}`} 
+                        />
+                        
+                        {/* Hover Actions for Individual Image */}
+                        {!loading && (
+                          <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/card:opacity-100 transition-all flex flex-col items-center justify-center gap-3 p-4">
+                            <button 
+                              onClick={() => downloadImage(imgUrl)}
+                              className="p-3 bg-white text-black rounded-full hover:scale-110 transition shadow-xl"
+                              title="Download this variant"
+                            >
+                              <Download size={20}/>
+                            </button>
+                            <span className="text-[8px] font-black text-white uppercase tracking-widest">Variant {index + 1}</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Global Action Bar (Bottom of grid) */}
                   {!loading && (
-                    <div className="absolute inset-0 bg-black/40 md:opacity-0 group-hover:opacity-100 transition-all flex flex-col md:flex-row items-center justify-center gap-3 p-6">
+                    <div className="flex flex-wrap items-center justify-center gap-3 animate-in fade-in slide-in-from-bottom-4 duration-700">
                       <button 
-                        onClick={() => downloadImage(image)} 
-                        className="w-full md:w-auto bg-white text-black px-8 py-4 rounded-full font-black text-[10px] tracking-widest flex items-center justify-center gap-2 hover:scale-105 transition shadow-2xl uppercase"
+                        onClick={() => generateImage(Math.floor(Math.random()*999999))} 
+                        className="bg-indigo-600 text-white px-8 py-4 rounded-full font-black text-[10px] tracking-widest flex items-center justify-center gap-2 hover:bg-indigo-500 hover:scale-105 transition shadow-2xl backdrop-blur-md uppercase"
                       >
-                        <Download size={18}/> Download
+                        <RefreshCw size={14}/> Re-Generate Batch
                       </button>
 
                       <button 
-                        onClick={() => generateImage(Math.floor(Math.random()*999999))} 
-                        className="w-full md:w-auto bg-indigo-600 text-white px-8 py-4 rounded-full font-black text-[10px] tracking-widest flex items-center justify-center gap-2 hover:scale-105 transition shadow-2xl backdrop-blur-md uppercase"
+                        onClick={() => { setImages([]); setSeed(""); }} 
+                        className="bg-white/5 hover:bg-red-500/10 text-zinc-400 hover:text-red-400 border border-white/10 px-8 py-4 rounded-full font-black text-[10px] tracking-widest flex items-center justify-center gap-2 transition uppercase"
                       >
-                        <RefreshCw size={16}/> New Variant
+                        <Trash2 size={14}/> Reset Studio
                       </button>
                     </div>
                   )}
                 </div>
               ) : (
                 /* Awaiting Input State (Default) */
-                <div className="text-center p-10 relative overflow-hidden w-full h-full flex items-center justify-center">
+                <div className="text-center p-10 relative overflow-hidden w-full h-[500px] flex items-center justify-center">
                   <div className="absolute inset-0 opacity-[0.03] [background-image:linear-gradient(to_right,#808080_1px,transparent_1px),linear-gradient(to_bottom,#808080_1px,transparent_1px)] [background-size:40px_40px]" />
                   
                   <div className="relative z-10">
@@ -1242,15 +1338,19 @@ export default function AIStudio() {
 
               {/* High-Z-Index Visionary Loader Overlay */}
               {loading && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 backdrop-blur-2xl z-[30] animate-in fade-in duration-300">
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 backdrop-blur-3xl z-[35] animate-in fade-in duration-500">
+                  {/* The Laser Scan Line */}
+                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-indigo-500 to-transparent shadow-[0_0_15px_rgba(79,70,229,0.8)] animate-neural-scan" />
+                  
                   <VisionaryLoader />
                   
-                  {/* Futuristic Dynamic Loading Message */}
                   <div className="mt-8 text-center">
-                      <p className="text-[10px] font-black uppercase tracking-[0.4em] text-indigo-400 animate-pulse">
-                          {loadingMessage}
-                      </p>
-                      <div className="w-32 h-[1px] bg-gradient-to-r from-transparent via-indigo-500/50 to-transparent mt-2 mx-auto" />
+                    <p className="text-[10px] font-black uppercase tracking-[0.4em] text-indigo-400 animate-pulse">
+                      {loadingMessage}
+                    </p>
+                    <p className="text-[8px] text-zinc-600 uppercase mt-2 font-bold tracking-widest">
+                      {batchCount > 1 ? `Synthesizing ${batchCount} Parallel Realities...` : 'Partitioning Latent Space...'}
+                    </p>
                   </div>
                 </div>
               )}
