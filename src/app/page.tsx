@@ -5,7 +5,8 @@ import {
   Download, Sparkles, Loader2, Image as ImageIcon, 
   Zap, Maximize, Lock, Unlock, RefreshCw,
   MousePointer2, LayoutGrid, Menu, X, Wand2, Hash,
-  History, Sliders, ShieldCheck, Info, AlertCircle, Ban, Copy, Check, Trash2, ChevronDown, UserCheck
+  History, Sliders, ShieldCheck, Info, AlertCircle, Ban, Copy, Check, Trash2, ChevronDown, UserCheck,
+  HelpCircle, BookOpen, AlertTriangle, ChevronUp
 } from 'lucide-react';
 
 // --- SUPABASE IMPORT ---
@@ -232,6 +233,9 @@ export default function AIStudio() {
   const [userId, setUserId] = useState<string>('');
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [currentUsername, setCurrentUsername] = useState<string | null>(null);
+
+  const [isGuideOpen, setIsGuideOpen] = useState(false);
+  const [openFaq, setOpenFaq] = useState<number | null>(null);
 
   useEffect(() => {
     const savedUsername = localStorage.getItem('imagynex_username');
@@ -1069,6 +1073,14 @@ export default function AIStudio() {
             <Link href="/gallery" className="text-indigo-400 hover:text-white transition">Gallery</Link>
             <Link href="/about" className="hover:text-white transition">About</Link>
             <Link href="/contact" className="hover:text-white transition">Contact</Link>
+            <button
+              type="button"
+              onClick={() => setIsGuideOpen(true)}
+              className="flex items-center gap-1.5 text-amber-400 hover:text-amber-300 transition outline-none cursor-pointer"
+            >
+              <BookOpen size={13} />
+              <span>How To Use</span>
+            </button>
 
             {/* Auth / Account Trigger */}
             {currentUsername ? (
@@ -1109,11 +1121,43 @@ export default function AIStudio() {
         </div>
 
         {isMenuOpen && (
-          <div className="md:hidden absolute top-16 left-0 w-full bg-black/95 backdrop-blur-3xl border-b border-white/10 p-8 flex flex-col gap-6 z-[100] animate-in fade-in slide-in-from-top-4">
-            <Link href="/" onClick={() => setIsMenuOpen(false)} className="text-lg font-bold text-white">Studio</Link>
-            <Link href="/gallery" onClick={() => setIsMenuOpen(false)} className="text-lg font-bold text-indigo-400">Global Gallery</Link>
-            <Link href="/about" onClick={() => setIsMenuOpen(false)} className="text-lg font-bold text-white">About</Link>
-            <Link href="/contact" onClick={() => setIsMenuOpen(false)} className="text-lg font-bold text-white">Contact</Link>
+          <div className="md:hidden absolute top-16 left-0 w-full bg-black/95 backdrop-blur-3xl border-b border-white/10 p-6 flex flex-col gap-5 z-[100] animate-in fade-in slide-in-from-top-4">
+            <Link href="/" onClick={() => setIsMenuOpen(false)} className="text-base font-bold text-white">Studio</Link>
+            <Link href="/gallery" onClick={() => setIsMenuOpen(false)} className="text-base font-bold text-indigo-400">Global Gallery</Link>
+            <Link href="/about" onClick={() => setIsMenuOpen(false)} className="text-base font-bold text-white">About</Link>
+            <Link href="/contact" onClick={() => setIsMenuOpen(false)} className="text-base font-bold text-white">Contact</Link>
+            <button
+              type="button"
+              onClick={() => setIsGuideOpen(true)}
+              className="flex items-center gap-1.5 text-amber-400 hover:text-amber-300 transition outline-none cursor-pointer"
+            >
+              <BookOpen size={13} />
+              <span>How To Use</span>
+            </button>
+            
+            <div className="pt-4 border-t border-white/10 flex flex-col gap-3">
+              {currentUsername ? (
+                <div className="flex items-center justify-between bg-zinc-900 p-3 rounded-xl border border-white/5">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="text-xs font-bold text-white">@{currentUsername}</span>
+                  </div>
+                  <button
+                    onClick={() => { setIsMenuOpen(false); handleSiteLogout(); }}
+                    className="px-3 py-1 bg-red-500/10 text-red-400 border border-red-500/20 text-[10px] font-black uppercase rounded-lg"
+                  >
+                    Logout
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => { setIsMenuOpen(false); setIsAuthModalOpen(true); }}
+                  className="w-full py-3 bg-indigo-600 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-lg"
+                >
+                  Sign In / Register
+                </button>
+              )}
+            </div>
           </div>
         )}
       </nav>
@@ -1123,12 +1167,22 @@ export default function AIStudio() {
           <div className="inline-block px-4 py-1.5 rounded-full bg-white/5 border border-white/10 text-[9px] md:text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400 mb-4 md:mb-6 shadow-[0_0_15px_rgba(79,70,229,0.15)]">
             Imagynex Neural Engine v2
           </div>
-          <h1 className="text-4xl md:text-8xl font-black leading-tight md:leading-[0.9] tracking-tighter mb-6 bg-gradient-to-b from-white to-zinc-600 bg-clip-text text-transparent italic">
+          <h1 className="text-3xl sm:text-5xl md:text-8xl font-black leading-tight md:leading-[0.9] tracking-tighter mb-6 bg-gradient-to-b from-white to-zinc-600 bg-clip-text text-transparent italic">
             IMAGINE <br className="hidden md:block" /> ANYTHING.
           </h1>
         </div>
 
         <div className="flex flex-col gap-6 max-w-5xl mx-auto">
+          {/* Important Notice / Warning Banner */}
+          <div className="bg-amber-500/10 border border-amber-500/25 rounded-2xl p-4 flex items-start gap-3 backdrop-blur-md">
+            <AlertTriangle className="text-amber-400 shrink-0 mt-0.5" size={18} />
+            <div className="text-xs text-zinc-300 leading-relaxed">
+              <span className="font-bold text-amber-400 uppercase tracking-wider block text-[10px] mb-1">
+                Notice: Account Data & Local Storage
+              </span>
+              Please avoid clearing your browser cache or cookies. In Guest Mode, creations are cached locally on your device. Account synchronization for registered users is currently undergoing active maintenance, and full automated recovery after a browser wipe cannot be guaranteed. We strongly recommend downloading and saving your preferred images immediately upon creation.
+            </div>
+          </div>
           <div className="bg-zinc-900/40 border border-white/10 p-5 md:p-8 rounded-[24px] md:rounded-[48px] backdrop-blur-3xl shadow-2xl space-y-6">
             <div className="space-y-3">
               <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-1">
@@ -1140,10 +1194,10 @@ export default function AIStudio() {
                   <button 
                     key={s.name} 
                     onClick={() => setSelectedStyle(s.name)} 
-                    className={`relative flex-shrink-0 w-28 h-28 rounded-2xl overflow-hidden transition-all duration-500 snap-center group border-2 outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 ${
+                    className={`relative flex-shrink-0 w-28 h-28 rounded-2xl overflow-hidden transition-all duration-300 snap-center group border-2 outline-none cursor-pointer ${
                       selectedStyle === s.name 
-                      ? 'border-indigo-500 scale-105 shadow-[0_0_20px_rgba(79,70,229,0.4)]' 
-                      : 'border-white/5 hover:border-white/20'
+                      ? 'border-indigo-500 scale-105 shadow-[0_10px_25px_rgba(79,70,229,0.45)]' 
+                      : 'border-white/5 hover:border-white/30 hover:-translate-y-1'
                     }`}
                   >
                     <img 
@@ -1208,8 +1262,11 @@ export default function AIStudio() {
               </div>
 
               <div className="relative group/prompt">
+                {/* Ambient glow effect on focus/hover */}
+                <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-violet-600 rounded-2xl blur opacity-20 group-focus-within/prompt:opacity-75 transition duration-500 pointer-events-none" />
+                
                 <textarea 
-                  className="w-full bg-black/80 border border-white/10 rounded-2xl p-5 pr-16 text-sm md:text-lg outline-none transition-all duration-300 h-32 md:h-28 resize-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 focus:shadow-[0_0_30px_rgba(79,70,229,0.15)] placeholder:text-zinc-700" 
+                  className="relative w-full bg-black/90 border border-white/10 rounded-2xl p-4 md:p-5 pr-16 text-base md:text-lg outline-none transition-all duration-300 h-32 md:h-28 resize-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 focus:shadow-[0_0_30px_rgba(79,70,229,0.25)] placeholder:text-zinc-700" 
                   value={prompt} 
                   onChange={(e) => setPrompt(e.target.value)} 
                   placeholder="Describe your wildest imagination..." 
@@ -1472,7 +1529,7 @@ export default function AIStudio() {
                       <button 
                         key={r.label} 
                         onClick={() => setRatio(r.label)} 
-                        className={`flex flex-col items-center justify-center gap-2 p-3 rounded-xl border transition-all duration-300 outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 ${
+                        className={`flex flex-col items-center justify-center gap-1.5 p-2 md:p-3 rounded-xl border transition-all duration-300 outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 ${
                           ratio === r.label 
                           ? 'bg-white text-black border-white shadow-[0_10px_20px_rgba(255,255,255,0.1)]' 
                           : 'bg-black/60 border-white/5 text-zinc-400 hover:border-white/20 hover:text-white'
@@ -1687,15 +1744,20 @@ export default function AIStudio() {
                   )}
                 </div>
               ) : (
-                <div className="text-center p-10 relative overflow-hidden w-full h-[500px] flex items-center justify-center">
-                  <div className="absolute inset-0 opacity-[0.03] [background-image:linear-gradient(to_right,#808080_1px,transparent_1px),linear-gradient(to_bottom,#808080_1px,transparent_1px)] [background-size:40px_40px]" />
+                <div className="text-center p-10 relative overflow-hidden w-full h-[450px] md:h-[520px] flex items-center justify-center">
+                  <div className="absolute inset-0 opacity-[0.04] [background-image:radial-gradient(#4f46e5_1px,transparent_1px)] [background-size:24px_24px]" />
+                  <div className="absolute w-72 h-72 bg-indigo-600/10 rounded-full blur-[100px] pointer-events-none" />
                   
-                  <div className="relative z-10">
-                    <div className="w-20 h-20 bg-indigo-500/5 rounded-full flex items-center justify-center mx-auto mb-6 border border-indigo-500/10 animate-pulse transition-all duration-700">
-                      <ImageIcon size={32} className="text-indigo-500/40" />
+                  <div className="relative z-10 flex flex-col items-center">
+                    <div className="relative w-20 h-20 rounded-3xl bg-zinc-900/80 border border-indigo-500/20 flex items-center justify-center mb-5 shadow-2xl shadow-indigo-500/10 group-hover:scale-105 transition-transform duration-500">
+                      <div className="absolute inset-0 bg-indigo-500/10 rounded-3xl animate-ping opacity-25" />
+                      <Sparkles size={28} className="text-indigo-400 animate-pulse" />
                     </div>
-                    <p className="text-zinc-400 font-black uppercase tracking-[0.3em] text-[10px]">
-                      Awaiting Neural Input
+                    <p className="text-white font-black uppercase tracking-[0.3em] text-xs mb-1">
+                      Latent Canvas Idle
+                    </p>
+                    <p className="text-zinc-500 text-[10px] font-mono tracking-wider">
+                      Type your vision above & ignite neural core
                     </p>
                   </div>
                 </div>
@@ -1865,9 +1927,69 @@ export default function AIStudio() {
             </div>
           </div>
         )}
+
+        {/* FAQ (Questions & Answers) Section */}
+          <section className="mt-24 max-w-4xl mx-auto px-2">
+            <div className="text-center mb-10">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[10px] font-black uppercase tracking-widest mb-3">
+                <HelpCircle size={12} /> Got Questions?
+              </div>
+              <h2 className="text-2xl md:text-4xl font-black uppercase italic tracking-tight text-white">
+                Frequently Asked Questions
+              </h2>
+              <p className="text-zinc-500 text-xs mt-2">Essential rules, engine details, and studio operations</p>
+            </div>
+
+            <div className="space-y-3">
+              {[
+                {
+                  q: "How do I generate images in Imagynex AI?",
+                  a: "Enter a detailed vision in the prompt box (or click 'Surprise Me' for automated creative prompts). Select an Art Style, pick an aspect ratio, and click 'Fire Neural Core' to run the synthesis."
+                },
+                {
+                  q: "What is the difference between Free Models and Pro Models?",
+                  a: "Free models (such as Sana Sprint, FLUX.2 Dev Free, and SDXL Lightning) consume zero Pollen credits. Pro models (such as FLUX Pro, FLUX Schnell, and GPT Image Mini) provide advanced photorealism and require connecting an authenticated Pollen Vault."
+                },
+                {
+                  q: "Will my images stay safe if I reset or clear my browser?",
+                  a: "In Guest Mode, generations are held directly in your browser's local cache and will be removed if site data is cleared. Account restoration features are undergoing ongoing upgrades. Always use the download button to preserve your high-resolution assets locally."
+                },
+                {
+                  q: "What is Ghost Mode (Private) vs. Public Synthesis?",
+                  a: "Public Synthesis shares completed artworks directly to the community Global Gallery feed. Enabling Ghost Mode restricts saving strictly to your private workspace, preventing images from appearing on public discovery feeds."
+                },
+                {
+                  q: "How does batch generation (2X, 4X) work?",
+                  a: "Selecting batch quantities runs sequential rendering calls with individual seed permutations. This safeguards upstream GPU nodes from concurrency timeouts while delivering varied creative compositions."
+                }
+              ].map((faq, index) => (
+                <div 
+                  key={index}
+                  className="bg-zinc-900/50 border border-white/5 rounded-2xl overflow-hidden transition-all duration-300"
+                >
+                  <button
+                    onClick={() => setOpenFaq(openFaq === index ? null : index)}
+                    className="w-full p-5 text-left flex items-center justify-between gap-4 cursor-pointer hover:bg-white/[0.02]"
+                  >
+                    <span className="font-bold text-sm text-zinc-200">{faq.q}</span>
+                    {openFaq === index ? (
+                      <ChevronUp size={16} className="text-indigo-400 shrink-0" />
+                    ) : (
+                      <ChevronDown size={16} className="text-zinc-500 shrink-0" />
+                    )}
+                  </button>
+                  {openFaq === index && (
+                    <div className="px-5 pb-5 pt-1 text-xs text-zinc-400 leading-relaxed border-t border-white/5">
+                      {faq.a}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
       </main>
 
-      <footer className="bg-black/60 border-t border-white/5 pt-16 md:pt-20 pb-44 px-5 text-center">
+      <footer className="bg-black/60 border-t border-white/5 pt-12 md:pt-20 pb-52 md:pb-44 px-5 text-center">
         <div className="max-w-4xl mx-auto space-y-12">
           <div className="bg-zinc-900/80 border border-dashed border-white/10 rounded-[32px] p-8 md:p-12 text-zinc-400 text-[8px] md:text-[10px] font-black uppercase tracking-[0.4em] hover:border-white/20 transition-colors duration-500 cursor-default">
             Imagynex AI Neural Creative Suite
@@ -1899,10 +2021,35 @@ export default function AIStudio() {
         </div>
       </footer>
 
-      <div className="md:hidden fixed bottom-6 left-1/2 -translate-x-1/2 bg-zinc-900/80 backdrop-blur-3xl border border-white/10 px-8 py-4 rounded-full flex items-center gap-10 shadow-2xl z-50 transition-all border-b-indigo-500/50">
-        <button onClick={() => window.scrollTo({top: 0, behavior: 'smooth'})} className="text-zinc-400 hover:text-white transition-colors"><MousePointer2 size={20} /></button>
-        <button onClick={() => generateImage()} className="text-indigo-500 scale-125 hover:scale-[1.4] transition-transform"><Zap size={24} fill="currentColor" /></button>
-        <button onClick={() => { const el = document.getElementById('canvas'); if(el) el.scrollIntoView({ behavior: 'smooth' }); }} className="text-zinc-400 hover:text-white transition-colors"><LayoutGrid size={20} /></button>
+      <div className="md:hidden fixed bottom-5 left-1/2 -translate-x-1/2 bg-zinc-900/90 backdrop-blur-2xl border border-white/10 px-7 py-3 rounded-full flex items-center gap-8 shadow-[0_10px_30px_rgba(0,0,0,0.8)] z-50 border-b-indigo-500/40">
+        <button 
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} 
+          className="text-zinc-400 hover:text-white p-1"
+          aria-label="Scroll to top"
+        >
+          <MousePointer2 size={18} />
+        </button>
+        
+        <button 
+          onClick={() => {
+            const el = document.getElementById('canvas');
+            if (el) el.scrollIntoView({ behavior: 'smooth' });
+            generateImage();
+          }} 
+          disabled={loading || !prompt.trim()}
+          className="p-3 bg-indigo-600 disabled:bg-zinc-800 text-white rounded-full shadow-lg shadow-indigo-600/30 active:scale-90 transition-transform"
+          aria-label="Generate Image"
+        >
+          {loading ? <Loader2 size={18} className="animate-spin text-white" /> : <Zap size={18} fill="currentColor" className="text-amber-300" />}
+        </button>
+        
+        <button 
+          onClick={() => { const el = document.getElementById('canvas'); if (el) el.scrollIntoView({ behavior: 'smooth' }); }} 
+          className="text-zinc-400 hover:text-white p-1"
+          aria-label="View Canvas"
+        >
+          <LayoutGrid size={18} />
+        </button>
       </div>
 
       {showToast && (
@@ -1935,6 +2082,81 @@ export default function AIStudio() {
           setToast({ message: `Authenticated as @${user.username}`, type: 'success' });
         }}
       />
+
+      {/* Interactive Guide / Info Modal */}
+      {isGuideOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+          <div 
+            onClick={() => setIsGuideOpen(false)} 
+            className="absolute inset-0 bg-black/80 backdrop-blur-md animate-in fade-in duration-300" 
+          />
+          <div className="relative w-full max-w-2xl bg-zinc-900 border border-white/10 rounded-3xl p-6 md:p-8 max-h-[85vh] overflow-y-auto shadow-2xl z-10 animate-in zoom-in-95 duration-300">
+            <div className="flex items-center justify-between pb-4 border-b border-white/10 mb-6">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-indigo-500/10 rounded-xl text-indigo-400 border border-indigo-500/20">
+                  <BookOpen size={20} />
+                </div>
+                <div>
+                  <h3 className="font-black text-lg text-white uppercase italic">Studio User Manual</h3>
+                  <p className="text-[10px] text-zinc-500 uppercase tracking-widest">Imagynex Neural Platform Guide</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsGuideOpen(false)}
+                className="p-2 text-zinc-400 hover:text-white rounded-xl bg-white/5 transition cursor-pointer"
+                aria-label="Close Manual"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-6 text-xs text-zinc-300">
+              <div className="space-y-2">
+                <span className="text-indigo-400 font-bold uppercase tracking-wider text-[11px] block">
+                  1. Crafting Prompts
+                </span>
+                <p className="leading-relaxed text-zinc-400">
+                  Specify details regarding subject matter, lighting patterns, and cinematic lenses. Use the <strong className="text-amber-400">Surprise Me</strong> button for autonomous ideation, or click <strong className="text-indigo-400">Enhance</strong> to systematically enrich your text with high-fidelity descriptors.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <span className="text-indigo-400 font-bold uppercase tracking-wider text-[11px] block">
+                  2. Engine Catalog (Zero-Cost vs. Flagship)
+                </span>
+                <p className="leading-relaxed text-zinc-400">
+                  For limitless generation without an API key, switch the dropdown to <span className="text-emerald-400 font-mono">Sana Sprint</span> or <span className="text-emerald-400 font-mono">FLUX.2 Dev (Free)</span>. For enterprise realism, click <strong className="text-amber-400">Connect Vault</strong> to link your authorized Pollen balance.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <span className="text-indigo-400 font-bold uppercase tracking-wider text-[11px] block">
+                  3. Canvas Interactions & Remixing
+                </span>
+                <p className="leading-relaxed text-zinc-400">
+                  Hover over or tap any generated artifact to download clean PNG files directly. Clicking any artwork in the community Live Feed automatically loads its prompt, seed, style, and engine into your current studio workspace for instant remixing.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-300 space-y-1">
+                <span className="font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5 text-red-400">
+                  <AlertCircle size={14} /> Storage Notice
+                </span>
+                <p className="text-[11px] leading-relaxed">
+                  Make sure to download and store all valued outputs immediately. Browser resets will purge unauthenticated sessions, and infrastructure improvements on global user restoration remain in active development.
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setIsGuideOpen(false)}
+              className="mt-6 w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition cursor-pointer"
+            >
+              Got It, Return to Studio
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
