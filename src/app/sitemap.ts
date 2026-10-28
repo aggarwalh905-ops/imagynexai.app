@@ -1,56 +1,48 @@
 import { MetadataRoute } from 'next';
-import { db } from "@/lib/firebase";
-import { collection, query, where, getDocs, limit, orderBy } from "firebase/firestore";
+import { supabaseAdmin } from '@/lib/supabase';
 
-// Google discovery ko hamesha fresh rakhne ke liye dynamic config
-export const dynamic = 'force-dynamic';
-export const revalidate = 3600; // Har 1 ghante mein naya data fetch karega
+// Har 1 ghante (3600 seconds) mein sitemap background me revalidate hokar naya data lega
+export const revalidate = 3600;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const baseUrl = "https://imagynexai.vercel.app";
-  let imageEntries: MetadataRoute.Sitemap = [];
-  
-  try {
-    const galleryRef = collection(db, "gallery");
-    
-    // Sirf public images fetch karenge jo index honi chahiye
-    const q = query(
-      galleryRef, 
-      where("isPrivate", "==", false), 
-      orderBy("createdAt", "desc"),
-      limit(1000) 
-    );
+  let dynamicImageEntries: MetadataRoute.Sitemap = [];
 
-    const querySnapshot = await getDocs(q);
-    
-    imageEntries = querySnapshot.docs.map((doc) => {
-      const data = doc.data();
-      
-      return {
-        url: `${baseUrl}/gallery/${doc.id}`, 
-        // Firebase timestamp check
-        lastModified: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+  try {
+    // Supabase se public images fetch karenge jo gallery me visible hain
+    const { data: images, error } = await supabaseAdmin
+      .from('generations')
+      .select('id, created_at')
+      .eq('is_gallery', true)
+      .order('created_at', { ascending: false })
+      .limit(1000);
+
+    if (error) {
+      console.error("Supabase Sitemap Fetch Error:", error);
+    } else if (images && images.length > 0) {
+      dynamicImageEntries = images.map((img) => ({
+        url: `${baseUrl}/gallery/${img.id}`,
+        lastModified: img.created_at ? new Date(img.created_at) : new Date(),
         changeFrequency: 'weekly' as const,
         priority: 0.7,
-      };
-    });
-
-  } catch (error) {
-    console.error("Sitemap Fetch Error for Imagynex:", error);
-    imageEntries = []; // Error aane par empty array taaki static pages bache rahein
+      }));
+    }
+  } catch (err) {
+    console.error("Unexpected error in sitemap generation:", err);
+    dynamicImageEntries = [];
   }
 
   const staticPages: MetadataRoute.Sitemap = [
     { 
       url: baseUrl, 
       lastModified: new Date(), 
-      changeFrequency: 'always' as const, 
+      changeFrequency: 'hourly' as const, 
       priority: 1.0 
     },
     { 
       url: `${baseUrl}/gallery`, 
       lastModified: new Date(), 
-      changeFrequency: 'daily' as const, 
+      changeFrequency: 'hourly' as const, 
       priority: 0.9 
     },
     { 
@@ -79,5 +71,5 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     },
   ];
 
-  return [...staticPages, ...imageEntries];
+  return [...staticPages, ...dynamicImageEntries];
 }
